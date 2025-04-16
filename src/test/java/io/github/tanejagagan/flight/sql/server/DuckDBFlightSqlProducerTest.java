@@ -6,7 +6,6 @@ import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.github.tanejagagan.sql.commons.util.TestUtils;
 import org.apache.arrow.flight.*;
-import org.apache.arrow.flight.auth2.Auth2Constants;
 import org.apache.arrow.flight.sql.FlightSqlClient;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -23,6 +22,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -61,7 +61,6 @@ public class DuckDBFlightSqlProducerTest {
         allocator.close();
     }
 
-
     private static void setUpClientServer() throws Exception {
         final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55555);
         server = FlightServer.builder(
@@ -73,37 +72,9 @@ public class DuckDBFlightSqlProducerTest {
                 .start();
         final Location clientLocation = Location.forGrpcInsecure(LOCALHOST, server.getPort());
         sqlClient = new FlightSqlClient(FlightClient.builder(allocator, clientLocation)
-                .intercept(new FlightClientMiddleware.Factory() {
-                    private volatile String jwt = null;
-
-                    @Override
-                    public FlightClientMiddleware onCallStarted(CallInfo info) {
-                        return new FlightClientMiddleware() {
-                            @Override
-                            public void onBeforeSendingHeaders(CallHeaders outgoingHeaders) {
-                                if (jwt == null) {
-                                    outgoingHeaders.insert(Auth2Constants.AUTHORIZATION_HEADER,
-                                            AuthUtils.generateBasicAuthHeader(USER, PASSWORD));
-                                } else {
-                                    outgoingHeaders.insert(Auth2Constants.AUTHORIZATION_HEADER,
-                                            jwt);
-                                }
-                                outgoingHeaders.insert("database", TEST_CATALOG);
-                                outgoingHeaders.insert("schema", TEST_SCHEMA);
-                            }
-
-                            @Override
-                            public void onHeadersReceived(CallHeaders incomingHeaders) {
-                                jwt = incomingHeaders.get(Auth2Constants.AUTHORIZATION_HEADER);
-                            }
-
-                            @Override
-                            public void onCallCompleted(CallStatus status) {
-
-                            }
-                        };
-                    }
-                })
+                .intercept(AuthUtils.createClientMiddlewareFactor(USER,
+                        PASSWORD,
+                        Map.of("database", TEST_CATALOG, "schema", TEST_SCHEMA)))
                 .build());
 
     }
@@ -185,7 +156,6 @@ public class DuckDBFlightSqlProducerTest {
             // Expected. Ignore it
         }
     }
-
 
     @Test
     public void testGetCatalogsResults() throws Exception {

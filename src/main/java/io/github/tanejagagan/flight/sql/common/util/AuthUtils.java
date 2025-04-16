@@ -1,21 +1,23 @@
 package io.github.tanejagagan.flight.sql.common.util;
 
 import com.typesafe.config.Config;
+import com.typesafe.config.ConfigObject;
+import org.apache.arrow.flight.CallHeaders;
+import org.apache.arrow.flight.CallInfo;
+import org.apache.arrow.flight.CallStatus;
+import org.apache.arrow.flight.FlightClientMiddleware;
 import org.apache.arrow.flight.auth2.Auth2Constants;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import org.apache.arrow.flight.auth2.GeneratedBearerTokenAuthenticator;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Map;
-import java.util.function.Function;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.*;
 
 public class AuthUtils {
 
-    public static String generateJWTAuthHeader(String jwt) {
-        return Auth2Constants.BEARER_PREFIX + jwt;
-    }
 
     public static String generateBasicAuthHeader(String username, String password) {
         byte[] up = Base64.getEncoder().encode((username + ":" + password).getBytes(StandardCharsets.UTF_8));
@@ -34,9 +36,73 @@ public class AuthUtils {
         return new GeneratedBearerTokenAuthenticator(authenticator);
     }
 
-    private static  BasicCallHeaderAuthenticator.CredentialValidator createCredentialValidator(Config config) {
-        return NO_AUTH_CREDENTIAL_VALIDATOR;
+    public static FlightClientMiddleware.Factory createClientMiddlewareFactor(String username,
+                                                 String password,
+                                                 Map<String, String> headers) {
+        return new FlightClientMiddleware.Factory() {
+            private volatile String bearer = null;
+
+            @Override
+            public FlightClientMiddleware onCallStarted(CallInfo info) {
+                return new FlightClientMiddleware() {
+                    @Override
+                    public void onBeforeSendingHeaders(CallHeaders outgoingHeaders) {
+                        if (bearer == null) {
+                            outgoingHeaders.insert(Auth2Constants.AUTHORIZATION_HEADER,
+                                    AuthUtils.generateBasicAuthHeader(username, password));
+                        } else {
+                            outgoingHeaders.insert(Auth2Constants.AUTHORIZATION_HEADER,
+                                    bearer);
+                        }
+                        headers.forEach(outgoingHeaders::insert);
+                    }
+
+                    @Override
+                    public void onHeadersReceived(CallHeaders incomingHeaders) {
+                        bearer = incomingHeaders.get(Auth2Constants.AUTHORIZATION_HEADER);
+                    }
+
+                    @Override
+                    public void onCallCompleted(CallStatus status) {
+
+                    }
+                };
+            }
+        };
     }
+
+    private static  BasicCallHeaderAuthenticator.CredentialValidator createCredentialValidator(Config config) {
+        List<? extends ConfigObject> users = config.getObjectList("users");
+        Map<String, String> passwords = new HashMap<>();
+        users.forEach( o -> {
+            String name = o.get("name").toString();
+            String password = o.get("password").toString();
+            passwords.put(name, password);
+        });
+        return createCredentialValidator(passwords);
+    }
+
+    private static BasicCallHeaderAuthenticator.CredentialValidator createCredentialValidator(Map<String, String> userPassword) {
+        Map<String, byte[]> userHashMap = new HashMap<>();
+        userPassword.forEach((u, p) -> userHashMap.put(u, hash(p)));
+        return new BasicCallHeaderAuthenticator.CredentialValidator() {
+            @Override
+            public CallHeaderAuthenticator.AuthResult validate(String username, String password) throws Exception {
+                if(!password.isEmpty() &&
+                        Arrays.equals(userHashMap.get(username), hash(password))) {
+                    return new CallHeaderAuthenticator.AuthResult() {
+                        @Override
+                        public String getPeerIdentity() {
+                            return username;
+                        }
+                    };
+                } else {
+                    throw new RuntimeException("Authentication failure");
+                }
+            }
+        };
+    }
+
 
     private static final BasicCallHeaderAuthenticator.CredentialValidator NO_AUTH_CREDENTIAL_VALIDATOR = new BasicCallHeaderAuthenticator.CredentialValidator() {
         @Override
@@ -54,35 +120,14 @@ public class AuthUtils {
         }
     };
 
-    private static BasicCallHeaderAuthenticator.CredentialValidator createCredentialValidator(Map<String, String> usernameHash,
-                                                                                              Function<String, String> hashFn) {
-        return new BasicCallHeaderAuthenticator.CredentialValidator() {
-            final Map<String, String> map = usernameHash;
-            final Function<String, String> hashFunction = hashFn;
-            @Override
-            public CallHeaderAuthenticator.AuthResult validate(String username, String password) throws Exception {
-                String expectedHash = usernameHash.get(username);
-                String hash = hashFunction.apply(password);
-                if(expectedHash == null){
-                    var e  = compare(hash, hash);
-                    throw new RuntimeException("Authentication failure");
-                } else {
-                    if(compare(expectedHash, hash)) {
-                        throw new RuntimeException("Authentication failure");
-                    } else {
-                        return new CallHeaderAuthenticator.AuthResult() {
-                            @Override
-                            public String getPeerIdentity() {
-                                return username;
-                            }
-                        };
-                    }
-                }
-            }
-
-            boolean compare(String expected, String hash){
-                return false;
-            }
-        };
+    private static byte[] hash(String originalString) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+            return digest.digest(
+                    originalString.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
