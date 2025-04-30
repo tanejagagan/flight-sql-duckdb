@@ -8,9 +8,9 @@
 [<img src="https://img.shields.io/badge/PyPI-Arrow%20ADBC%20Flight%20SQL%20driver-blue?logo=PyPI">](https://pypi.org/project/adbc-driver-flightsql/)
 [<img src="https://img.shields.io/badge/PyPI-SQLFlite%20Ibis%20Backend-blue?logo=PyPI">](https://pypi.org/project/ibis-sqlflite/)
 [<img src="https://img.shields.io/badge/PyPI-SQLFlite%20SQLAlchemy%20Dialect-blue?logo=PyPI">](https://pypi.org/project/sqlalchemy-sqlflite-adbc-dialect/)
-Flight Sql Server with DuckDB backend lets you run DuckDB remotely and let multiple user connect to it remotely with flight jdbc driver.
+<br> Flight Sql Server with DuckDB backend lets you run DuckDB remotely and let multiple user connect to it remotely with flight jdbc driver.
 <br> It's very similar to https://github.com/voltrondata/sqlflite <br> But written in Java which for those comfortable writing code in java.
-This support all the client including JDBC, ADBC Python flight sql driver as well as sqlflite_client CLI tool
+This support all the clients including JDBC, ADBC Python flight sql driver as well as sqlflite_client CLI tool
 ## Dev Setup
 Requirement
 JDK 17 or 21
