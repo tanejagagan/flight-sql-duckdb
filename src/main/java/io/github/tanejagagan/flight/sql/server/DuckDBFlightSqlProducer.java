@@ -7,9 +7,11 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 import com.google.protobuf.*;
+import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
+import org.apache.arrow.flight.impl.Flight;
 import org.apache.arrow.flight.sql.FlightSqlProducer;
 import org.apache.arrow.flight.sql.FlightSqlUtils;
 import org.apache.arrow.flight.sql.impl.FlightSql;
@@ -58,6 +60,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     private final String producerId;
     private final BufferAllocator allocator;
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
+    private final String warehousePath;
 
     private final Cache<String, StatementContext<PreparedStatement>> preparedStatementLoadingCache;
     private final Cache<String, StatementContext<Statement>> statementLoadingCache;
@@ -67,10 +70,13 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     }
 
     public DuckDBFlightSqlProducer(Location location, String producerId) {
-        this(location, producerId, new RootAllocator());
+        this(location, producerId, new RootAllocator(),  System.getProperty("user.dir") + "/warehouse");
     }
 
-    public DuckDBFlightSqlProducer(Location location, String producerId, BufferAllocator allocator) {
+    public DuckDBFlightSqlProducer(Location location,
+                                   String producerId,
+                                   BufferAllocator allocator,
+                                   String warehousePath) {
         this.location = location;
         this.producerId = producerId;
         this.allocator = allocator;
@@ -86,6 +92,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                         .expireAfterWrite(10, TimeUnit.MINUTES)
                         .removalListener(new StatementRemovalListener<>())
                         .build();
+        this.warehousePath = warehousePath;
     }
 
     @Override
@@ -270,6 +277,37 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                                                     CallContext context, FlightStream flightStream,
                                                     StreamListener<PutResult> ackStream) {
         return null;
+    }
+
+    @Override
+    public Runnable acceptPutStatementBulkIngest(
+            FlightSql.CommandStatementIngest command,
+            CallContext context,
+            FlightStream flightStream,
+            StreamListener<PutResult> ackStream) {
+        Map<String, String > optionMap = command.getOptionsMap();
+        String path = optionMap.get("path");
+        final String completePath = warehousePath + "/" + path;
+        String format = optionMap.getOrDefault("format", "parquet");
+        String partitionColumnString = optionMap.get("partition");
+        List<String> partitionColumns;
+        if(partitionColumnString != null) {
+            partitionColumns = Arrays.stream(partitionColumnString.split(",")).toList();
+        } else {
+            partitionColumns = List.of();
+        }
+
+        return () -> {
+            FlightStreamReader reader = FlightStreamReader.of(flightStream, allocator);
+            try {
+                ConnectionPool.bulkIngestToFile(reader, allocator, completePath, partitionColumns, format);
+                ackStream.onNext(PutResult.empty());
+            } catch (SQLException e) {
+                ackStream.onError(e);
+            } finally {
+                ackStream.onCompleted();
+            }
+        };
     }
 
     @Override

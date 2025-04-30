@@ -10,6 +10,7 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 
 import java.io.IOException;
+import java.util.UUID;
 
 public class Main {
 
@@ -21,11 +22,15 @@ public class Main {
         String host = config.getString("host");
         Location location = Location.forGrpcInsecure(host, port);
         CallHeaderAuthenticator authenticator = AuthUtils.getAuthenticator(config);
+        String warehousePath = config.hasPath("warehousePath") ? config.getString("warehousePath") : System.getProperty("user.dir") + "/warehouse";
+        if(!checkWarehousePath(warehousePath)) {
+            System.out.printf("Warehouse dir does not exist %s. Create the dir to proceed", warehousePath);
+        }
         try (BufferAllocator allocator = new RootAllocator()){
              FlightServer flightServer = FlightServer.builder(
                              allocator,
                              location,
-                             new DuckDBFlightSqlProducer(location))
+                             new DuckDBFlightSqlProducer(location, UUID.randomUUID().toString(), allocator ,warehousePath))
                      .headerAuthenticator(authenticator)
                      .build();
 
@@ -40,5 +45,9 @@ public class Main {
             });
             severThread.start();
         }
+    }
+
+    private static boolean checkWarehousePath(String warehousePath) {
+        return true;
     }
 }

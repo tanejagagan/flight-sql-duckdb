@@ -7,8 +7,14 @@ import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.github.tanejagagan.sql.commons.util.TestUtils;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.sql.FlightSqlClient;
+import org.apache.arrow.flight.sql.impl.FlightSql;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.ipc.ArrowReader;
+import org.apache.arrow.vector.ipc.ArrowStreamReader;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -17,12 +23,16 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -34,16 +44,19 @@ public class DuckDBFlightSqlProducerTest {
     private static final String TEST_CATALOG = "producer_test_catalog";
     private static final String TEST_SCHEMA = "test_schema";
     private static final String TEST_TABLE = "test_table";
-    private static final BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE);
+    private static final BufferAllocator clientAllocator = new RootAllocator(Integer.MAX_VALUE);
+    private static final BufferAllocator serverAllocator = new RootAllocator(Integer.MAX_VALUE);
     private static final String LONG_RUNNING_QUERY = "with t as " +
             "(select len(split(concat('abcdefghijklmnopqrstuvwxyz:', generate_series), ':')) as len  from generate_series(1, 1000000000) )" +
             " select count(*) from t where len = 10";
     protected static FlightServer server;
     protected static FlightSqlClient sqlClient;
+    protected static String warehousePath;
 
     @BeforeAll
     public static void beforeAll() throws Exception {
         Path tempDir = Files.createTempDirectory("duckdb_" + DuckDBFlightSqlProducerTest.class.getName());
+        warehousePath = Files.createTempDirectory("duckdb_warehouse_" + DuckDBFlightSqlProducerTest.class.getName()).toString();
         String[] sqls = {
                 String.format("ATTACH '%s/file.db' AS %s", tempDir.toString(), TEST_CATALOG),
                 String.format("USE %s", TEST_CATALOG),
@@ -58,20 +71,20 @@ public class DuckDBFlightSqlProducerTest {
 
     @AfterAll
     public static void afterAll() {
-        allocator.close();
+        clientAllocator.close();
     }
 
     private static void setUpClientServer() throws Exception {
         final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55555);
         server = FlightServer.builder(
-                        allocator,
+                        serverAllocator,
                         serverLocation,
-                        new DuckDBFlightSqlProducer(serverLocation))
+                        new DuckDBFlightSqlProducer(serverLocation, UUID.randomUUID().toString(), serverAllocator, warehousePath))
                 .headerAuthenticator(AuthUtils.getAuthenticator())
                 .build()
                 .start();
         final Location clientLocation = Location.forGrpcInsecure(LOCALHOST, server.getPort());
-        sqlClient = new FlightSqlClient(FlightClient.builder(allocator, clientLocation)
+        sqlClient = new FlightSqlClient(FlightClient.builder(clientAllocator, clientLocation)
                 .intercept(AuthUtils.createClientMiddlewareFactor(USER,
                         PASSWORD,
                         Map.of("database", TEST_CATALOG, "schema", TEST_SCHEMA)))
@@ -89,13 +102,13 @@ public class DuckDBFlightSqlProducerTest {
                      sqlClient.prepare(query)) {
             try (final FlightStream stream =
                          sqlClient.getStream(preparedStatement.execute().getEndpoints().get(0).getTicket())) {
-                TestUtils.isEqual(query, allocator, FlightStreamReader.of(stream, allocator));
+                TestUtils.isEqual(query, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
             }
 
             // Read Again
             try (final FlightStream stream =
                          sqlClient.getStream(preparedStatement.execute().getEndpoints().get(0).getTicket())) {
-                TestUtils.isEqual(query, allocator, FlightStreamReader.of(stream, allocator));
+                TestUtils.isEqual(query, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
             }
         }
     }
@@ -108,7 +121,7 @@ public class DuckDBFlightSqlProducerTest {
         final FlightInfo flightInfo = sqlClient.execute(query);
         try (final FlightStream stream =
                      sqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket())) {
-            TestUtils.isEqual(query, allocator, FlightStreamReader.of(stream, allocator));
+            TestUtils.isEqual(query, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
         }
     }
 
@@ -162,7 +175,7 @@ public class DuckDBFlightSqlProducerTest {
         String expectedSql = "select distinct(database_name) as TABLE_CAT from duckdb_columns() order by database_name";
         try (final FlightStream stream =
                      sqlClient.getStream(sqlClient.getCatalogs().getEndpoints().get(0).getTicket())) {
-            TestUtils.isEqual(expectedSql, allocator, FlightStreamReader.of(stream, allocator));
+            TestUtils.isEqual(expectedSql, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
         }
     }
 
@@ -178,7 +191,7 @@ public class DuckDBFlightSqlProducerTest {
             }
             assertEquals(1, count);
         }
-    }
+    }                                                                                                                                          
 
     @Test
     public void testGetSchema() throws Exception {
@@ -189,6 +202,39 @@ public class DuckDBFlightSqlProducerTest {
                 count += stream.getRoot().getRowCount();
             }
             assertEquals(7, count);
+        }
+    }
+
+    @Test
+    public void putStream() throws Exception {
+        String query = "select * from generate_series(10)";
+        try(DuckDBConnection connection = ConnectionPool.getConnection();
+        var reader = ConnectionPool.getReader( connection, clientAllocator, query, 1000 )) {
+            var streamReader = new ArrowReaderWrapper(reader, clientAllocator);
+            var executeIngestOption = new FlightSqlClient.ExecuteIngestOptions("", FlightSql.CommandStatementIngest.TableDefinitionOptions.newBuilder().build(), false, "", "", Map.of("path", "test_123.parquet"));
+            sqlClient.executeIngest(streamReader, executeIngestOption);
+        }
+    }
+
+    static class ArrowReaderWrapper extends ArrowStreamReader {
+        ArrowReader arrowReader;
+        public ArrowReaderWrapper(ArrowReader reader, BufferAllocator allocator){
+            super((InputStream) new ByteArrayInputStream(new byte[0]), allocator);
+            this.arrowReader = reader;
+        }
+
+        @Override
+        protected Schema readSchema() throws IOException {
+            return arrowReader.getVectorSchemaRoot().getSchema();
+        }
+        @Override
+        public VectorSchemaRoot getVectorSchemaRoot() throws IOException {
+            return arrowReader.getVectorSchemaRoot();
+        }
+
+        @Override
+        public boolean loadNextBatch() throws IOException {
+            return arrowReader.loadNextBatch();
         }
     }
 }
