@@ -24,6 +24,12 @@ JDK 17 or 21
 ### Connecting to the server via JDBC
 Download the [Apache Arrow Flight SQL JDBC driver](https://search.maven.org/search?q=a:flight-sql-jdbc-driver)
 
+### Support functionality
+1. Database and schema specified as part of connection url. Passed to server as header database and schema.
+2. Fetch size can be specified. It's passed to the server in header fetch_size.
+3. Bulk write to parquet file using bulk upload functionality. Idea is to to bulk upload and then add those files to metadata.
+4. Username and Passwords can be specified in application.conf file.
+
 You can then use the JDBC driver to connect from your host computer to the locally running Docker Flight SQL server with this JDBC string (change the password value to match the value specified for the SQLFLITE_PASSWORD environment variable if you changed it from the example above):
 ```bash
 jdbc:arrow-flight-sql://localhost:55559??database=memory&useEncryption=0&user=admin&password=admin

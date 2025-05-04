@@ -8,10 +8,10 @@ import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 import com.google.protobuf.*;
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
+import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
-import org.apache.arrow.flight.impl.Flight;
 import org.apache.arrow.flight.sql.FlightSqlProducer;
 import org.apache.arrow.flight.sql.FlightSqlUtils;
 import org.apache.arrow.flight.sql.impl.FlightSql;
@@ -230,7 +230,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             Objects.requireNonNull(statementContext);
             final PreparedStatement statement = statementContext.getStatement();
             streamResultSet(() -> (DuckDBResultSet) statement.executeQuery(),
-                allocator,
+                allocator, getBatchSize(context),
                 listener);
         } catch (IOException e) {
             throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
@@ -250,7 +250,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                 streamResultSet(() -> {
                     statement.execute(statementContext.getQuery());
                     return (DuckDBResultSet) statement.getResultSet();
-                }, allocator, listener);
+                }, allocator, getBatchSize(context), listener);
             } finally {
                 statementLoadingCache.invalidate(statementHandle.uuid);
             }
@@ -572,13 +572,23 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
 
     private static DuckDBConnection getConnection(final CallContext context) {
         CallHeaders headers = context.getMiddleware(FlightConstants.HEADER_KEY).headers();
-        String database = headers.get("database");
-        String schema = headers.get("schema");
+        String database = headers.get(Headers.HEADER_DATABASE);
+        String schema = headers.get(Headers.HEADER_SCHEMA);
         if (schema == null) {
             schema = DEFAULT_SCHEMA;
         }
         String[] sqls = {String.format("USE %s.%s", database, schema)};
         return ConnectionPool.getConnection(sqls);
+    }
+
+    private static int getBatchSize(final CallContext context) {
+        CallHeaders headers = context.getMiddleware(FlightConstants.HEADER_KEY).headers();
+        String batchSize = headers.get(Headers.HEADER_FETCH_SIZE);
+        if(batchSize == null) {
+            return DEFAULT_ARROW_BATCH_SIZE;
+        } else {
+            return Integer.parseInt(batchSize);
+        }
     }
 
     private interface ResultSetSupplierFromConnection {
@@ -591,7 +601,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                                         final ServerStreamListener listener) {
 
         try (DuckDBConnection connection = getConnection(context)) {
-            streamResultSet(() -> supplier.get(connection), allocator, listener);
+            streamResultSet(() -> supplier.get(connection), allocator, getBatchSize(context), listener);
         } catch (SQLException e) {
             listener.error(e);
             logger.atError().setCause(e).log("Error getting connection");
@@ -606,9 +616,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
 
     private static void streamResultSet(ResultSetSupplier supplier,
                                         BufferAllocator allocator,
+                                        final int batchSize,
                                         final ServerStreamListener listener) {
         try (DuckDBResultSet resultSet = supplier.get();
-             ArrowReader reader = (ArrowReader) resultSet.arrowExportStream(allocator, DEFAULT_ARROW_BATCH_SIZE)) {
+             ArrowReader reader = (ArrowReader) resultSet.arrowExportStream(allocator, batchSize)) {
             listener.start(reader.getVectorSchemaRoot());
             while (reader.loadNextBatch()) {
                 listener.putNext();

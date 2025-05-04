@@ -2,6 +2,7 @@ package io.github.tanejagagan.flight.sql.server;
 
 
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
+import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.github.tanejagagan.sql.commons.util.TestUtils;
@@ -87,7 +88,8 @@ public class DuckDBFlightSqlProducerTest {
         sqlClient = new FlightSqlClient(FlightClient.builder(clientAllocator, clientLocation)
                 .intercept(AuthUtils.createClientMiddlewareFactor(USER,
                         PASSWORD,
-                        Map.of("database", TEST_CATALOG, "schema", TEST_SCHEMA)))
+                        Map.of(Headers.HEADER_DATABASE, TEST_CATALOG,
+                                Headers.HEADER_SCHEMA, TEST_SCHEMA)))
                 .build());
 
     }
@@ -213,6 +215,23 @@ public class DuckDBFlightSqlProducerTest {
             var streamReader = new ArrowReaderWrapper(reader, clientAllocator);
             var executeIngestOption = new FlightSqlClient.ExecuteIngestOptions("", FlightSql.CommandStatementIngest.TableDefinitionOptions.newBuilder().build(), false, "", "", Map.of("path", "test_123.parquet"));
             sqlClient.executeIngest(streamReader, executeIngestOption);
+        }
+    }
+
+    @Test
+    public void testSetFetchSize() throws Exception {
+        String query = "select * from generate_series(100)";
+        var flightCallHeader = new FlightCallHeaders();
+        flightCallHeader.insert(Headers.HEADER_FETCH_SIZE, Integer.toString(10));
+        HeaderCallOption callOption = new HeaderCallOption(flightCallHeader);
+        final FlightInfo flightInfo = sqlClient.execute(query, callOption);
+        int batches = 0;
+        try (final FlightStream stream =
+                     sqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket(), callOption)) {
+            while (stream.next()) {
+                batches ++;
+            }
+            assertEquals(11, batches);
         }
     }
 
