@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class DuckDBFlightSqlProducerTest {
     protected static final String LOCALHOST = "localhost";
-    private static final Logger LOGGER = LoggerFactory.getLogger(DuckDBFlightSqlProducerTest.class);
+    private static final Logger logger = LoggerFactory.getLogger(DuckDBFlightSqlProducerTest.class);
     private static final String USER = "admin";
     private static final String PASSWORD = "password";
     private static final String TEST_CATALOG = "producer_test_catalog";
@@ -124,6 +124,19 @@ public class DuckDBFlightSqlProducerTest {
         try (final FlightStream stream =
                      sqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket())) {
             TestUtils.isEqual(query, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
+        }
+    }
+
+    @Test
+    public void testBadStatement() throws Exception {
+        String query = "SELECT x FROM generate_series(10)";
+        final FlightInfo flightInfo = sqlClient.execute(query);
+        try (final FlightStream stream =
+                     sqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket())) {
+            stream.next();
+            throw new RuntimeException("It should not come here");
+        } catch (FlightRuntimeException flightRuntimeException){
+            // All good. Its expected to have this exception
         }
     }
 

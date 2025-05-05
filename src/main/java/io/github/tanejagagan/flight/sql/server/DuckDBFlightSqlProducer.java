@@ -10,6 +10,7 @@ import com.google.protobuf.*;
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
+import io.grpc.StatusRuntimeException;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.sql.FlightSqlProducer;
@@ -46,8 +47,8 @@ import static java.util.Objects.isNull;
 import static org.duckdb.DuckDBConnection.DEFAULT_SCHEMA;
 
 /**
- * It's a simple implementation which support most of the construct for reading.
- * For now only property which is supported is database and schema which is supplied as the connection parameter
+ * It's a simple implementation which support most of the construct for reading as well as bulk writing to parquet file.
+ * For now only property which is supported is database, schema and fetch size which are supplied as the connection parameter
  * and available in the header. More options will be supported in the future version.
  * Future implementation note for statement we check if its SET or RESET statement and based on that use cookies to set unset the values
  */
@@ -625,8 +626,8 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                 listener.putNext();
             }
         } catch (IOException | SQLException e) {
-            listener.error(e);
-            throw new RuntimeException(e);
+            CallStatus callStatus = new CallStatus(FlightStatusCode.INVALID_ARGUMENT, e, e.getMessage(), null);
+            listener.error(FlightRuntimeExceptionFactory.of(callStatus));
         } finally {
             listener.completed();
         }
