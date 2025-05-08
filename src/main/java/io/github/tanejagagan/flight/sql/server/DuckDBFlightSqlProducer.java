@@ -10,7 +10,6 @@ import com.google.protobuf.*;
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
-import io.grpc.StatusRuntimeException;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.sql.FlightSqlProducer;
@@ -38,6 +37,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.protobuf.Any.pack;
 import static com.google.protobuf.ByteString.copyFrom;
@@ -55,6 +55,7 @@ import static org.duckdb.DuckDBConnection.DEFAULT_SCHEMA;
 public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable {
 
     protected static final Calendar DEFAULT_CALENDAR = JdbcToArrowUtils.getUtcCalendar();
+
     private static final int DEFAULT_ARROW_BATCH_SIZE = 10000;
     private final static Logger logger = LoggerFactory.getLogger(DuckDBFlightSqlProducer.class);
     private final Location location;
@@ -62,9 +63,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     private final BufferAllocator allocator;
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
     private final String warehousePath;
+    private static AtomicLong sqlIdCounter = new AtomicLong();
 
-    private final Cache<String, StatementContext<PreparedStatement>> preparedStatementLoadingCache;
-    private final Cache<String, StatementContext<Statement>> statementLoadingCache;
+    private final Cache<Long, StatementContext<PreparedStatement>> preparedStatementLoadingCache;
+    private final Cache<Long, StatementContext<Statement>> statementLoadingCache;
 
     public DuckDBFlightSqlProducer(Location location){
         this(location, UUID.randomUUID().toString());
@@ -100,7 +102,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     public void createPreparedStatement(FlightSql.ActionCreatePreparedStatementRequest request, final CallContext context, StreamListener<Result> listener) {
         // Running on another thread
         final Connection connection = getConnection(context);
-        StatementHandle handle = new StatementHandle(request.getQuery());
+        StatementHandle handle = newStatementHandle(request.getQuery());
         Future<?> unused =
                 executorService.submit(
                         () -> {
@@ -115,7 +117,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                                 final StatementContext<PreparedStatement> preparedStatementContext =
                                         new StatementContext<>(preparedStatement, request.getQuery());
                                 preparedStatementLoadingCache.put(
-                                        handle.uuid, preparedStatementContext);
+                                        handle.sqlId, preparedStatementContext);
 
                                 final Schema parameterSchema =
                                         JdbcToArrowUtils.jdbcToArrowSchema(preparedStatement.getParameterMetaData(), DEFAULT_CALENDAR);
@@ -159,7 +161,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                         () -> {
                             try {
                                 StatementHandle statementHandle = StatementHandle.deserialize(request.getPreparedStatementHandle());
-                                preparedStatementLoadingCache.invalidate(statementHandle.uuid);
+                                preparedStatementLoadingCache.invalidate(statementHandle.sqlId);
                             } catch (final Exception e) {
                                 listener.onError(e);
                                 return;
@@ -177,7 +179,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         try {
             StatementHandle statementHandle = StatementHandle.deserialize(command.getPreparedStatementHandle());
             StatementContext<PreparedStatement> statementContext =
-                    preparedStatementLoadingCache.getIfPresent(statementHandle.uuid);
+                    preparedStatementLoadingCache.getIfPresent(statementHandle.sqlId);
             assert statementContext != null;
             return getFlightInfoForSchema(command, descriptor, null);
         } catch (IOException e) {
@@ -191,7 +193,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             final FlightSql.CommandStatementQuery request,
             final CallContext context,
             final FlightDescriptor descriptor) {
-        StatementHandle handle = new StatementHandle(request.getQuery());
+        StatementHandle handle = newStatementHandle(request.getQuery());
         try {
             final ByteString serializedHandle =
                     copyFrom(handle.serialize());
@@ -202,7 +204,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                     connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
             final String query = request.getQuery();
             final StatementContext<Statement> statementContext = new StatementContext<>(statement, query);
-            statementLoadingCache.put(handle.uuid, statementContext);
+            statementLoadingCache.put(handle.sqlId, statementContext);
             FlightSql.TicketStatementQuery ticket =
                     FlightSql.TicketStatementQuery.newBuilder().setStatementHandle(serializedHandle).build();
             return getFlightInfoForSchema(
@@ -227,7 +229,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         try {
             StatementHandle statementHandle = StatementHandle.deserialize(command.getPreparedStatementHandle());
             StatementContext<PreparedStatement> statementContext =
-                preparedStatementLoadingCache.getIfPresent(statementHandle.uuid);
+                preparedStatementLoadingCache.getIfPresent(statementHandle.sqlId);
             Objects.requireNonNull(statementContext);
             final PreparedStatement statement = statementContext.getStatement();
             streamResultSet(() -> (DuckDBResultSet) statement.executeQuery(),
@@ -246,14 +248,14 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         try {
             StatementHandle statementHandle = StatementHandle.deserialize(ticketStatementQuery.getStatementHandle());
             try (final StatementContext<Statement> statementContext =
-                         Objects.requireNonNull(statementLoadingCache.getIfPresent(statementHandle.uuid))) {
+                         Objects.requireNonNull(statementLoadingCache.getIfPresent(statementHandle.sqlId))) {
                 Statement statement = statementContext.getStatement();
                 streamResultSet(() -> {
                     statement.execute(statementContext.getQuery());
                     return (DuckDBResultSet) statement.getResultSet();
                 }, allocator, getBatchSize(context), listener);
             } finally {
-                statementLoadingCache.invalidate(statementHandle.uuid);
+                statementLoadingCache.invalidate(statementHandle.sqlId);
             }
         } catch (IOException e) {
             throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
@@ -340,7 +342,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         try {
             final StatementHandle statementHandle = StatementHandle.deserialize(ticketStatementQuery.getStatementHandle());
             try (final StatementContext<Statement> statementContext =
-                         Objects.requireNonNull(statementLoadingCache.getIfPresent(statementHandle.uuid))) {
+                         Objects.requireNonNull(statementLoadingCache.getIfPresent(statementHandle.sqlId))) {
                 Statement statement = statementContext.getStatement();
                 listener.onNext(CancelStatus.CANCELLING);
                 statement.cancel();
@@ -362,7 +364,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         try {
             final StatementHandle statementHandle = StatementHandle.deserialize(ticketPreparedStatementQuery.getPreparedStatementHandle());
             try (final StatementContext<PreparedStatement> statementContext =
-                         Objects.requireNonNull(preparedStatementLoadingCache.getIfPresent(statementHandle.uuid))) {
+                         Objects.requireNonNull(preparedStatementLoadingCache.getIfPresent(statementHandle.sqlId))) {
                 Statement statement = statementContext.getStatement();
                 listener.onNext(CancelStatus.CANCELLING);
                 statement.cancel();
@@ -541,9 +543,9 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     }
 
     private static class StatementRemovalListener<T extends Statement>
-            implements RemovalListener<String, StatementContext<T>> {
+            implements RemovalListener<Long, StatementContext<T>> {
         @Override
-        public void onRemoval(final RemovalNotification<String, StatementContext<T>> notification) {
+        public void onRemoval(final RemovalNotification<Long, StatementContext<T>> notification) {
             try {
                 Connection connection = Objects.requireNonNull(notification.getValue()).getStatement().getConnection();
                 AutoCloseables.close(notification.getValue(), connection);
@@ -633,10 +635,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         }
     }
 
-    public record StatementHandle(String sql, String uuid) {
-        public StatementHandle(String sql){
-            this(sql, UUID.randomUUID().toString());
-        }
+    private StatementHandle newStatementHandle(String query) {
+        return new StatementHandle(query, sqlIdCounter.incrementAndGet(), producerId);
+    }
+    public record StatementHandle(String query, long sqlId, String producerId) {
 
         private static final ObjectMapper objectMapper = new ObjectMapper();
 

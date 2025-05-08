@@ -222,12 +222,16 @@ public class DuckDBFlightSqlProducerTest {
 
     @Test
     public void putStream() throws Exception {
-        String query = "select * from generate_series(10)";
-        try(DuckDBConnection connection = ConnectionPool.getConnection();
-        var reader = ConnectionPool.getReader( connection, clientAllocator, query, 1000 )) {
-            var streamReader = new ArrowReaderWrapper(reader, clientAllocator);
-            var executeIngestOption = new FlightSqlClient.ExecuteIngestOptions("", FlightSql.CommandStatementIngest.TableDefinitionOptions.newBuilder().build(), false, "", "", Map.of("path", "test_123.parquet"));
-            sqlClient.executeIngest(streamReader, executeIngestOption);
+        testPutStream("test_123.parquet");
+    }
+
+    @Test
+    public void putStreamWithError() throws Exception {
+        testPutStream("test_456.parquet");
+        try {
+            testPutStream("test_456.parquet");
+        } catch (Exception e ){
+          // Exception is expected.
         }
     }
 
@@ -245,6 +249,18 @@ public class DuckDBFlightSqlProducerTest {
                 batches ++;
             }
             assertEquals(11, batches);
+        }
+    }
+
+    private void testPutStream(String filename) throws SQLException, IOException {
+        String query = "select * from generate_series(10)";
+        try(DuckDBConnection connection = ConnectionPool.getConnection();
+            var reader = ConnectionPool.getReader( connection, clientAllocator, query, 1000 )) {
+            var streamReader = new ArrowReaderWrapper(reader, clientAllocator);
+            var executeIngestOption = new FlightSqlClient.ExecuteIngestOptions("",
+                    FlightSql.CommandStatementIngest.TableDefinitionOptions.newBuilder().build(),
+                    false, "", "", Map.of("path", filename));
+            sqlClient.executeIngest(streamReader, executeIngestOption);
         }
     }
 
