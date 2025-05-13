@@ -10,10 +10,11 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <arrow.version>18.1.0</arrow.version>
+        <arrow.version>18.2.0</arrow.version>
         <duckdb.version>1.2.2.0</duckdb.version>
         <typesafe-config.version>1.4.3</typesafe-config.version>
         <sql-common.version>0.0.4</sql-common.version>
+        <calcite.version>1.25.0</calcite.version>
     </properties>
     <dependencies>
         <dependency>
@@ -33,14 +34,26 @@
         </dependency>
         <dependency>
             <groupId>org.apache.arrow</groupId>
-            <artifactId>flight-sql-jdbc-driver</artifactId>
+            <artifactId>flight-sql-jdbc-core</artifactId>
             <version>${arrow.version}</version>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.calcite.avatica</groupId>
+                    <artifactId>avatica</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>flight-sql</artifactId>
             <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.calcite.avatica</groupId>
+            <artifactId>avatica-core</artifactId>
+            <version>${calcite.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.duckdb</groupId>
@@ -69,6 +82,9 @@
             <artifactId>config</artifactId>
             <version>${typesafe-config.version}</version>
         </dependency>
+        <!-- https://mvnrepository.com/artifact/org.apache.calcite.avatica/avatica-core -->
+        <!-- https://mvnrepository.com/artifact/org.apache.calcite.avatica/avatica -->
+
     </dependencies>
     <build>
         <plugins>

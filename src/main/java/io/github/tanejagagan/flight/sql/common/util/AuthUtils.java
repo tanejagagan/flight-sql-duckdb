@@ -75,8 +75,8 @@ public class AuthUtils {
         List<? extends ConfigObject> users = config.getObjectList("users");
         Map<String, String> passwords = new HashMap<>();
         users.forEach( o -> {
-            String name = o.get("name").toString();
-            String password = o.get("password").toString();
+            String name = o.toConfig().getString("name");
+            String password = o.toConfig().getString("password");
             passwords.put(name, password);
         });
         return createCredentialValidator(passwords);
@@ -88,8 +88,10 @@ public class AuthUtils {
         return new BasicCallHeaderAuthenticator.CredentialValidator() {
             @Override
             public CallHeaderAuthenticator.AuthResult validate(String username, String password) throws Exception {
-                if(!password.isEmpty() &&
-                        Arrays.equals(userHashMap.get(username), hash(password))) {
+                var storePassword = userHashMap.get(username);
+                if(storePassword != null &&
+                        !password.isEmpty() &&
+                        passwordMatch(storePassword, hash(password))) {
                     return new CallHeaderAuthenticator.AuthResult() {
                         @Override
                         public String getPeerIdentity() {
@@ -120,7 +122,7 @@ public class AuthUtils {
         }
     };
 
-    private static byte[] hash(String originalString) {
+    public static byte[] hash(String originalString) {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -129,5 +131,17 @@ public class AuthUtils {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public static boolean passwordMatch(byte[] aArray, byte[] bArray) {
+        var len = Math.min(aArray.length, bArray.length);
+        var diff = 0;
+        for(int i = 0 ; i < len; i ++){
+            if(aArray[i] != bArray[i]){
+                diff ++;
+            }
+        }
+        diff = diff + Math.abs(aArray.length - bArray.length);
+        return diff == 0;
     }
 }
