@@ -9,8 +9,6 @@ import com.google.protobuf.*;
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
-import io.grpc.internal.ServerListener;
-import io.grpc.internal.StreamListener;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.sql.FlightSqlProducer;

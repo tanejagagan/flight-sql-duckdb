@@ -33,6 +33,11 @@
             <version>${arrow.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.jcommander</groupId>
+            <artifactId>jcommander</artifactId>
+            <version>2.0</version>
+        </dependency>
+        <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>flight-sql-jdbc-core</artifactId>
             <version>${arrow.version}</version>

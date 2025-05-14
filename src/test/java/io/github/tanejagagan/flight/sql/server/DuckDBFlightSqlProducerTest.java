@@ -30,6 +30,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Map;
@@ -50,7 +51,7 @@ public class DuckDBFlightSqlProducerTest {
     private static final String LONG_RUNNING_QUERY = "with t as " +
             "(select len(split(concat('abcdefghijklmnopqrstuvwxyz:', generate_series), ':')) as len  from generate_series(1, 1000000000) )" +
             " select count(*) from t where len = 10";
-    protected static FlightServer server;
+    protected static FlightServer flightServer;
     protected static FlightSqlClient sqlClient;
     protected static String warehousePath;
 
@@ -77,14 +78,14 @@ public class DuckDBFlightSqlProducerTest {
 
     private static void setUpClientServer() throws Exception {
         final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55555);
-        server = FlightServer.builder(
+        flightServer = FlightServer.builder(
                         serverAllocator,
                         serverLocation,
                         new DuckDBFlightSqlProducer(serverLocation, UUID.randomUUID().toString(), serverAllocator, warehousePath))
                 .headerAuthenticator(AuthUtils.getAuthenticator())
                 .build()
                 .start();
-        final Location clientLocation = Location.forGrpcInsecure(LOCALHOST, server.getPort());
+        final Location clientLocation = Location.forGrpcInsecure(LOCALHOST, flightServer.getPort());
         sqlClient = new FlightSqlClient(FlightClient.builder(clientAllocator, clientLocation)
                 .intercept(AuthUtils.createClientMiddlewareFactor(USER,
                         PASSWORD,
@@ -252,6 +253,39 @@ public class DuckDBFlightSqlProducerTest {
         }
     }
 
+    @Test
+    // These are disabled because the issue with driver which
+    // does not let me troubleshoot the issue as it's a uber jar
+    // and lines do not match.
+    public void testMetadata() throws SQLException {
+        try(Connection connection = getConnection()) {
+            var databaseMetadata = connection.getMetaData();
+            //databaseMetadata.getTables();
+            try (var rs = databaseMetadata.getSchemas()) {
+                while(rs.next()) {
+                    System.out.printf("%s, %s\n",
+                            rs.getString(1),
+                            rs.getString(2));
+                }
+            }
+
+            //databaseMetadata.getCatalogs();
+            try (var rs = databaseMetadata.getCatalogs()) {
+                while(rs.next()) {
+                    System.out.printf("%s\n",
+                            rs.getString(1));
+                }
+            }
+
+            try( var rs = databaseMetadata.getTables(null, null, null, null)){
+                while(rs.next()) {
+                    System.out.printf("%s",
+                            rs.getString(1));
+                }
+            }
+        }
+    }
+
     private void testPutStream(String filename) throws SQLException, IOException {
         String query = "select * from generate_series(10)";
         try(DuckDBConnection connection = ConnectionPool.getConnection();
@@ -262,6 +296,11 @@ public class DuckDBFlightSqlProducerTest {
                     false, "", "", Map.of("path", filename));
             sqlClient.executeIngest(streamReader, executeIngestOption);
         }
+    }
+
+    private static Connection getConnection() throws SQLException {
+        String url = String.format("jdbc:arrow-flight-sql://localhost:%s/?database=memory&useEncryption=0&user=%s&password=%s&retainAuth=true", flightServer.getPort(), USER, PASSWORD );
+        return DriverManager.getConnection(url);
     }
 
     static class ArrowReaderWrapper extends ArrowStreamReader {

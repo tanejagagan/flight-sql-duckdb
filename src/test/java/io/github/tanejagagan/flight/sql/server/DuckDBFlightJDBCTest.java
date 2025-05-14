@@ -50,6 +50,11 @@ public class DuckDBFlightJDBCTest {
         try(Connection connection = getConnection();
             Statement  st = connection.createStatement()) {
             st.executeQuery("select 1");
+            try ( ResultSet resultSet = st.getResultSet()) {
+                while (resultSet.next()){
+                    resultSet.getInt(1);
+                }
+            };
         }
     }
 
@@ -66,6 +71,11 @@ public class DuckDBFlightJDBCTest {
         try(Connection connection = getConnectionWithUserPassword();
             Statement  st = connection.createStatement()) {
             st.executeQuery("select 1");
+            try ( ResultSet resultSet = st.getResultSet()) {
+                while (resultSet.next()){
+                    resultSet.getInt(1);
+                }
+            };
         }
     }
 
@@ -103,6 +113,39 @@ public class DuckDBFlightJDBCTest {
             try(ResultSet set  = st.getResultSet()) {
                 while (set.next()){
                     System.out.println(set.getObject(1, Long.class));
+                }
+            }
+        }
+    }
+
+    @Test
+    // These are disabled because the issue with driver which
+    // does not let me troubleshoot the issue as it's a uber jar
+    // and lines do not match.
+    public void testMetadata() throws SQLException {
+        try(Connection connection = getConnection()) {
+            var databaseMetadata = connection.getMetaData();
+            //databaseMetadata.getTables();
+            try (var rs = databaseMetadata.getSchemas()) {
+                while(rs.next()) {
+                    System.out.printf("%s, %s\n",
+                            rs.getString(1),
+                            rs.getString(2));
+                }
+            }
+
+            //databaseMetadata.getCatalogs();
+            try (var rs = databaseMetadata.getCatalogs()) {
+                while(rs.next()) {
+                    System.out.printf("%s\n",
+                            rs.getString(1));
+                }
+            }
+
+            try( var rs = databaseMetadata.getTables(null, null, null, null)){
+                while(rs.next()) {
+                    System.out.printf("%s",
+                            rs.getString(1));
                 }
             }
         }
