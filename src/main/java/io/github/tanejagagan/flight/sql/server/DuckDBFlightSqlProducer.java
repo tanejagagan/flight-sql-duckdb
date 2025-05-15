@@ -84,13 +84,13 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         this.allocator = allocator;
         preparedStatementLoadingCache =
                 CacheBuilder.newBuilder()
-                        .maximumSize(100)
+                        .maximumSize(4000)
                         .expireAfterAccess(10, TimeUnit.MINUTES)
                         .removalListener(new StatementRemovalListener<PreparedStatement>())
                         .build();
         statementLoadingCache =
                 CacheBuilder.newBuilder()
-                        .maximumSize(100)
+                        .maximumSize(4000)
                         .expireAfterWrite(10, TimeUnit.MINUTES)
                         .removalListener(new StatementRemovalListener<>())
                         .build();
@@ -186,7 +186,9 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         StatementHandle statementHandle = StatementHandle.deserialize(command.getPreparedStatementHandle());
         StatementContext<PreparedStatement> statementContext =
                 preparedStatementLoadingCache.getIfPresent(statementHandle.queryId());
-        assert statementContext != null;
+        if (statementContext == null) {
+            handleContextNotFound();
+        }
         return getFlightInfoForSchema(command, descriptor, null);
     }
 
@@ -236,7 +238,9 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         StatementHandle statementHandle = StatementHandle.deserialize(command.getPreparedStatementHandle());
         StatementContext<PreparedStatement> statementContext =
             preparedStatementLoadingCache.getIfPresent(statementHandle.queryId());
-        Objects.requireNonNull(statementContext);
+        if (statementContext == null) {
+            handleContextNotFound();
+        }
         final PreparedStatement statement = statementContext.getStatement();
         streamResultSet(() -> (DuckDBResultSet) statement.executeQuery(),
             allocator, getBatchSize(context),
@@ -249,8 +253,12 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             final CallContext context,
             final ServerStreamListener listener) {
         StatementHandle statementHandle = StatementHandle.deserialize(ticketStatementQuery.getStatementHandle());
-        try (final StatementContext<Statement> statementContext =
-                     Objects.requireNonNull(statementLoadingCache.getIfPresent(statementHandle.queryId()))) {
+        try  {
+            final StatementContext<Statement> statementContext =
+                    statementLoadingCache.getIfPresent(statementHandle.queryId());
+            if (statementContext == null) {
+                handleContextNotFound();
+            }
             Statement statement = statementContext.getStatement();
             streamResultSet(() -> {
                 statement.execute(statementContext.getQuery());
@@ -353,21 +361,23 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         try {
             StatementContext<Statement> statementContext =
                     statementLoadingCache.getIfPresent(statementHandle.queryId());
-            if( statementContext != null) {
-                Statement statement = statementContext.getStatement();
-                listener.onNext(CancelStatus.CANCELLING);
-                try {
-                    statement.cancel();
-                } catch (SQLException e){
-                    listener.onError(FlightRuntimeExceptionFactory.of(CallStatus.INTERNAL));
-                    logger.atError().setCause(e).log("error canceling");
-                }
-                listener.onNext(CancelStatus.CANCELLED);
-            } else {
-                listener.onError(FlightRuntimeExceptionFactory.of(CallStatus.NOT_FOUND));
+            if (statementContext == null) {
+                handleContextNotFound(listener);
+                return;
             }
+
+            Statement statement = statementContext.getStatement();
+            listener.onNext(CancelStatus.CANCELLING);
+            try {
+                statement.cancel();
+            } catch (SQLException e) {
+                listener.onError(FlightRuntimeExceptionFactory.of(CallStatus.INTERNAL));
+                logger.atError().setCause(e).log("error canceling");
+            }
+            listener.onNext(CancelStatus.CANCELLED);
         } finally {
             listener.onCompleted();
+            statementLoadingCache.invalidate(statementHandle.queryId());
         }
     }
 
@@ -535,8 +545,8 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         @Override
         public void onRemoval(final RemovalNotification<Long, StatementContext<T>> notification) {
             try {
-                Connection connection = Objects.requireNonNull(notification.getValue()).getStatement().getConnection();
-                AutoCloseables.close(notification.getValue(), connection);
+                assert notification.getValue() != null;
+                notification.getValue().close();
             } catch (final Exception e) {
                 // swallow
             }
@@ -655,5 +665,12 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     private static void handleNoSuchDBSchema(StreamListener<Result> listener, NoSuchCatalogSchemaError exception){
         listener.onError(FlightRuntimeExceptionFactory.of(new CallStatus(FlightStatusCode.INVALID_ARGUMENT, null, exception.getMessage(), null)));
         listener.onCompleted();
+    }
+
+    private static void handleContextNotFound() {
+        throw FlightRuntimeExceptionFactory.of(CallStatus.NOT_FOUND);
+    }
+    private static void handleContextNotFound(StreamListener<CancelStatus> listener) {
+        listener.onError(FlightRuntimeExceptionFactory.of(CallStatus.NOT_FOUND));
     }
 }
