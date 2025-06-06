@@ -8,6 +8,7 @@ import com.google.common.cache.RemovalNotification;
 import com.google.protobuf.*;
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.flight.sql.common.Headers;
+import io.github.tanejagagan.flight.sql.common.util.CryptoUtils;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
@@ -54,13 +55,15 @@ import static org.duckdb.DuckDBConnection.DEFAULT_SCHEMA;
 public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable {
 
     protected static final Calendar DEFAULT_CALENDAR = JdbcToArrowUtils.getUtcCalendar();
+    public static final int DEFAULT_ARROW_BATCH_SIZE = 10000;
 
-    private static final int DEFAULT_ARROW_BATCH_SIZE = 10000;
+    ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final static Logger logger = LoggerFactory.getLogger(DuckDBFlightSqlProducer.class);
     private final Location location;
     private final String producerId;
+
+    private final String secretKey;
     private final BufferAllocator allocator;
-    private final ExecutorService executorService = Executors.newFixedThreadPool(10);
     private final String warehousePath;
     private static AtomicLong sqlIdCounter = new AtomicLong();
 
@@ -72,16 +75,18 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     }
 
     public DuckDBFlightSqlProducer(Location location, String producerId) {
-        this(location, producerId, new RootAllocator(),  System.getProperty("user.dir") + "/warehouse");
+        this(location, producerId, "change me", new RootAllocator(),  System.getProperty("user.dir") + "/warehouse");
     }
 
     public DuckDBFlightSqlProducer(Location location,
                                    String producerId,
+                                   String secretKey,
                                    BufferAllocator allocator,
                                    String warehousePath) {
         this.location = location;
         this.producerId = producerId;
         this.allocator = allocator;
+        this.secretKey = secretKey;
         preparedStatementLoadingCache =
                 CacheBuilder.newBuilder()
                         .maximumSize(4000)
@@ -161,12 +166,16 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
 
     @Override
     public void closePreparedStatement(FlightSql.ActionClosePreparedStatementRequest request, CallContext context, StreamListener<Result> listener) {
+        final StatementHandle statementHandle = StatementHandle.deserialize(request.getPreparedStatementHandle());
+        if (!statementHandle.isValid(secretKey)) {
+            handleSignatureMismatch(listener);
+            return;
+        }
         // Running on another thread
         Future<?> unused =
                 executorService.submit(
                         () -> {
                             try {
-                                StatementHandle statementHandle = StatementHandle.deserialize(request.getPreparedStatementHandle());
                                 preparedStatementLoadingCache.invalidate(statementHandle.queryId());
                             } catch (final Exception e) {
                                 listener.onError(e);
@@ -184,11 +193,15 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             final FlightDescriptor descriptor) {
 
         StatementHandle statementHandle = StatementHandle.deserialize(command.getPreparedStatementHandle());
+        if (!statementHandle.isValid(secretKey)) {
+            handleSignatureMismatch();
+        }
         StatementContext<PreparedStatement> statementContext =
                 preparedStatementLoadingCache.getIfPresent(statementHandle.queryId());
         if (statementContext == null) {
             handleContextNotFound();
         }
+
         return getFlightInfoForSchema(command, descriptor, null);
     }
 
@@ -236,15 +249,18 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     public void getStreamPreparedStatement(FlightSql.CommandPreparedStatementQuery command, CallContext context,
                                            ServerStreamListener listener) {
         StatementHandle statementHandle = StatementHandle.deserialize(command.getPreparedStatementHandle());
+        if (!statementHandle.isValid(secretKey)) {
+            handleSignatureMismatch(listener);
+        }
         StatementContext<PreparedStatement> statementContext =
             preparedStatementLoadingCache.getIfPresent(statementHandle.queryId());
         if (statementContext == null) {
             handleContextNotFound();
         }
         final PreparedStatement statement = statementContext.getStatement();
-        streamResultSet(() -> (DuckDBResultSet) statement.executeQuery(),
+        streamResultSet(executorService, () -> (DuckDBResultSet) statement.executeQuery(),
             allocator, getBatchSize(context),
-            listener);
+            listener, () -> {});
     }
 
     @Override
@@ -253,20 +269,25 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             final CallContext context,
             final ServerStreamListener listener) {
         StatementHandle statementHandle = StatementHandle.deserialize(ticketStatementQuery.getStatementHandle());
-        try  {
-            final StatementContext<Statement> statementContext =
-                    statementLoadingCache.getIfPresent(statementHandle.queryId());
-            if (statementContext == null) {
-                handleContextNotFound();
-            }
-            Statement statement = statementContext.getStatement();
-            streamResultSet(() -> {
-                statement.execute(statementContext.getQuery());
-                return (DuckDBResultSet) statement.getResultSet();
-            }, allocator, getBatchSize(context), listener);
-        } finally {
-            statementLoadingCache.invalidate(statementHandle.queryId());
+        if(!statementHandle.isValid(secretKey)) {
+            handleSignatureMismatch(listener);
+            return;
         }
+        final StatementContext<Statement> statementContext =
+                statementLoadingCache.getIfPresent(statementHandle.queryId());
+        if (statementContext == null) {
+            handleContextNotFound();
+        }
+        Statement statement = statementContext.getStatement();
+        streamResultSet(executorService,
+                () -> {
+                    statement.execute(statementContext.getQuery());
+                    return (DuckDBResultSet) statement.getResultSet();
+                },
+                allocator,
+                getBatchSize(context),
+                listener,
+                () -> statementLoadingCache.invalidate(statementHandle.queryId()));
     }
 
     @Override
@@ -358,6 +379,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
 
     private void cancel(StatementHandle statementHandle,
                         StreamListener<CancelStatus> listener) {
+        if (!statementHandle.isValid(secretKey)) {
+            handleSignatureMismatch(listener);
+            return;
+        }
         try {
             StatementContext<Statement> statementContext =
                     statementLoadingCache.getIfPresent(statementHandle.queryId());
@@ -415,7 +440,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
 
     @Override
     public void getStreamCatalogs(final CallContext context, final ServerStreamListener listener) {
-        streamResultSet(DuckDBDatabaseMetadataUtil::getCatalogs, context, allocator, listener);
+        streamResultSet(executorService, DuckDBDatabaseMetadataUtil::getCatalogs, context, allocator, listener);
     }
 
     @Override
@@ -429,7 +454,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         final String catalog = command.hasCatalog() ? command.getCatalog() : null;
         final String schemaFilterPattern =
                 command.hasDbSchemaFilterPattern() ? command.getDbSchemaFilterPattern() : null;
-        streamResultSet(connection ->
+        streamResultSet(executorService, connection ->
                         DuckDBDatabaseMetadataUtil.getSchemas(connection, catalog, schemaFilterPattern),
                 context, allocator, listener);
     }
@@ -461,7 +486,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         final int protocolSize = protocolStringList.size();
         final String[] tableTypes =
                 protocolSize == 0 ? null : protocolStringList.toArray(new String[protocolSize]);
-        streamResultSet(connection ->
+        streamResultSet(executorService, connection ->
             DuckDBDatabaseMetadataUtil.getTables(connection, catalog, schemaFilterPattern, tableFilterPattern, tableTypes),
                 context, allocator, listener);
     }
@@ -527,7 +552,8 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
 
     @Override
     public void close() throws Exception {
-        AutoCloseables.close(this.allocator);
+        AutoCloseables.close(this.allocator, this.executorService);
+
     }
 
     @Override
@@ -601,18 +627,38 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         DuckDBResultSet get(DuckDBConnection connection) throws SQLException;
     }
 
-    private static void streamResultSet(ResultSetSupplierFromConnection supplier,
+    private static void streamResultSet(ExecutorService executorService,
+                                        ResultSetSupplierFromConnection supplier,
                                         CallContext context,
                                         BufferAllocator allocator,
                                         final ServerStreamListener listener) {
 
-        try (DuckDBConnection connection = getConnection(context)) {
-            streamResultSet(() -> supplier.get(connection), allocator, getBatchSize(context), listener);
-        } catch (SQLException e) {
-            listener.error(e);
-            logger.atError().setCause(e).log("Error getting connection");
-        } catch (NoSuchCatalogSchemaError e) {
+        streamResultSet(executorService, supplier, context, allocator, listener, () -> {});
+    }
+    private static void streamResultSet( ExecutorService executorService,
+                                         ResultSetSupplierFromConnection supplier,
+                                         CallContext context,
+                                         BufferAllocator allocator,
+                                         final ServerStreamListener listener,
+                                         Runnable finalBlock) {
 
+        try {
+            DuckDBConnection connection = getConnection(context);
+            streamResultSet(executorService,
+                    () -> supplier.get(connection),
+                    allocator,
+                    getBatchSize(context),
+                    listener,
+                    () -> {
+                        try {
+                            connection.close();
+                        } catch (SQLException e) {
+                            logger.atError().setCause(e).log("Error closing connection");
+                        }
+                        finalBlock.run();
+                    });
+        } catch (NoSuchCatalogSchemaError e) {
+            handleNoSuchDBSchema(listener, e);
         }
     }
 
@@ -620,41 +666,36 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         DuckDBResultSet get() throws SQLException;
     }
 
-    private static void streamResultSet(ResultSetSupplier supplier,
+    private static void streamResultSet(ExecutorService executorService,
+                                        ResultSetSupplier supplier,
                                         BufferAllocator allocator,
                                         final int batchSize,
-                                        final ServerStreamListener listener) {
-        try (DuckDBResultSet resultSet = supplier.get();
-             ArrowReader reader = (ArrowReader) resultSet.arrowExportStream(allocator, batchSize)) {
-            listener.start(reader.getVectorSchemaRoot());
-            while (reader.loadNextBatch()) {
-                listener.putNext();
+                                        final ServerStreamListener listener,
+                                        Runnable finalBlock) {
+        executorService.submit(() -> {
+            var error = false ;
+            try (DuckDBResultSet resultSet = supplier.get();
+                 ArrowReader reader = (ArrowReader) resultSet.arrowExportStream(allocator, batchSize)) {
+                listener.start(reader.getVectorSchemaRoot());
+                while (reader.loadNextBatch()) {
+                    listener.putNext();
+                }
+            } catch (IOException | SQLException e) {
+                CallStatus callStatus = new CallStatus(FlightStatusCode.INVALID_ARGUMENT, e, e.getMessage(), null);
+                listener.error(FlightRuntimeExceptionFactory.of(callStatus));
+                error = true;
+            } finally {
+                if(!error) {
+                    listener.completed();
+                }
+                finalBlock.run();
             }
-        } catch (IOException | SQLException e) {
-            CallStatus callStatus = new CallStatus(FlightStatusCode.INVALID_ARGUMENT, e, e.getMessage(), null);
-            listener.error(FlightRuntimeExceptionFactory.of(callStatus));
-        } finally {
-            listener.completed();
-        }
+        });
     }
 
-    private static void streamResultSet(String sql,
-                                        BufferAllocator allocator,
-                                        CallContext context,
-                                        final ServerStreamListener listener){
-        try (DuckDBConnection connection = getConnection(context);
-          var statement =  connection.createStatement()) {
-            streamResultSet(() -> (DuckDBResultSet) statement.getResultSet(), allocator, getBatchSize(context), listener);
-        } catch (SQLException e) {
-            listener.error(e);
-            logger.atError().setCause(e).log("Error getting connection");
-        } catch (NoSuchCatalogSchemaError e) {
-            handleNoSuchDBSchema(listener, e);
-        }
-    }
 
     private StatementHandle newStatementHandle(String query) {
-        return new StatementHandle(query, sqlIdCounter.incrementAndGet(), producerId);
+        return new StatementHandle(query, sqlIdCounter.incrementAndGet(), producerId).signed(secretKey);
     }
 
     private static void handleNoSuchDBSchema(ServerStreamListener listener, NoSuchCatalogSchemaError exception){
@@ -670,6 +711,22 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     private static void handleContextNotFound() {
         throw FlightRuntimeExceptionFactory.of(CallStatus.NOT_FOUND);
     }
+
+    private static <T> void handleSignatureMismatch(StreamListener<T> listener) {
+        listener.onError(FlightRuntimeExceptionFactory.of(
+                new CallStatus(CallStatus.UNAUTHORIZED.code(), null, "Signature in the handle do not match", null)));
+    }
+
+    private static void handleSignatureMismatch() {
+        throw FlightRuntimeExceptionFactory.of(
+                new CallStatus(CallStatus.UNAUTHORIZED.code(), null, "Signature in the handle do not match", null));
+    }
+
+    private static void handleSignatureMismatch(ServerStreamListener listener) {
+        listener.error(FlightRuntimeExceptionFactory.of(
+                new CallStatus(CallStatus.UNAUTHORIZED.code(), null, "Signature in the handle do not match", null)));
+    }
+
     private static void handleContextNotFound(StreamListener<CancelStatus> listener) {
         listener.onError(FlightRuntimeExceptionFactory.of(CallStatus.NOT_FOUND));
     }

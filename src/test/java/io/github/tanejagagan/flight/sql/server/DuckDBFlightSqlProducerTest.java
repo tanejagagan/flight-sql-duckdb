@@ -77,11 +77,13 @@ public class DuckDBFlightSqlProducerTest {
     }
 
     private static void setUpClientServer() throws Exception {
-        final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55555);
+        final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55556);
         flightServer = FlightServer.builder(
                         serverAllocator,
                         serverLocation,
-                        new DuckDBFlightSqlProducer(serverLocation, UUID.randomUUID().toString(), serverAllocator, warehousePath))
+                        new DuckDBFlightSqlProducer(serverLocation,
+                                UUID.randomUUID().toString(), "change me",
+                                serverAllocator, warehousePath))
                 .headerAuthenticator(AuthUtils.getAuthenticator())
                 .build()
                 .start();
@@ -121,6 +123,17 @@ public class DuckDBFlightSqlProducerTest {
             "SELECT * from " + TEST_CATALOG + "." + TEST_SCHEMA + "." + TEST_TABLE
     })
     public void testStatement(String query) throws Exception {
+        final FlightInfo flightInfo = sqlClient.execute(query);
+        try (final FlightStream stream =
+                     sqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket())) {
+            TestUtils.isEqual(query, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SELECT * FROM generate_series(" + DuckDBFlightSqlProducer.DEFAULT_ARROW_BATCH_SIZE * 3 + ")"
+    })
+    public void testStatementMultiBatch(String query) throws Exception {
         final FlightInfo flightInfo = sqlClient.execute(query);
         try (final FlightStream stream =
                      sqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket())) {

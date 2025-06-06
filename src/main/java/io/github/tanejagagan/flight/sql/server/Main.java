@@ -53,11 +53,14 @@ public class Main {
         String keystoreLocation = config.getString("keystore");
         String serverCertLocation = config.getString("serverCert");
         String warehousePath = config.hasPath("warehousePath") ? config.getString("warehousePath") : System.getProperty("user.dir") + "/warehouse";
+        String secretKey = config.getString("secretKey");
+        String producerId = config.hasPath("producerId") ? config.getString("producerId") : UUID.randomUUID().toString();
+
         if(!checkWarehousePath(warehousePath)) {
             System.out.printf("Warehouse dir does not exist %s. Create the dir to proceed", warehousePath);
         }
         BufferAllocator allocator = new RootAllocator();
-        var producer = new DuckDBFlightSqlProducer(location, UUID.randomUUID().toString(), allocator ,warehousePath);
+        var producer = new DuckDBFlightSqlProducer(location, producerId, secretKey, allocator ,warehousePath);
         var certStream =  getInputStreamForResource(serverCertLocation);
         var keyStream = getInputStreamForResource(keystoreLocation);
         FlightServer flightServer = FlightServer.builder(allocator, location, producer)
