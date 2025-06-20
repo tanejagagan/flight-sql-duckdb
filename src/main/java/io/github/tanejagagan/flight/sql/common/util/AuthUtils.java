@@ -2,10 +2,7 @@ package io.github.tanejagagan.flight.sql.common.util;
 
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigObject;
-import org.apache.arrow.flight.CallHeaders;
-import org.apache.arrow.flight.CallInfo;
-import org.apache.arrow.flight.CallStatus;
-import org.apache.arrow.flight.FlightClientMiddleware;
+import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.auth2.Auth2Constants;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
@@ -36,9 +33,9 @@ public class AuthUtils {
         return new GeneratedBearerTokenAuthenticator(authenticator);
     }
 
-    public static FlightClientMiddleware.Factory createClientMiddlewareFactor(String username,
-                                                 String password,
-                                                 Map<String, String> headers) {
+    public static FlightClientMiddleware.Factory createClientMiddlewareFactory(String username,
+                                                                               String password,
+                                                                               Map<String, String> headers) {
         return new FlightClientMiddleware.Factory() {
             private volatile String bearer = null;
 

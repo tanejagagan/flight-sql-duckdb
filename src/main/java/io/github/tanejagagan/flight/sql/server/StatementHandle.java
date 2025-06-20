@@ -19,12 +19,16 @@ public record StatementHandle(String query, long queryId, String producerId,
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    byte[] serialize() throws JsonProcessingException {
-        return objectMapper.writeValueAsBytes(this);
+    byte[] serialize() {
+        try {
+            return objectMapper.writeValueAsBytes(this);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public boolean isValid(String key) {
-        return CryptoUtils.generateHMACSHA1(key, queryId + ":" + query).equals( queryChecksum);
+    public boolean signatureMismatch(String key) {
+        return !CryptoUtils.generateHMACSHA1(key, queryId + ":" + query).equals(queryChecksum);
     }
 
     public StatementHandle signed(String key) {

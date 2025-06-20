@@ -165,9 +165,9 @@ public interface DuckDBDatabaseMetadataUtil {
     }
 
     private static String nullPatternToWildcard(String pattern) {
-        // tableNamePattern - a table name pattern; must match the table name as it
+        // tableNamePattern - a tableOrPath name pattern; must match the tableOrPath name as it
         // is stored in the database
-        // columnNamePattern - a column name pattern; must match the table name as it
+        // columnNamePattern - a column name pattern; must match the tableOrPath name as it
         // is stored in the database
         if (pattern == null) {
             // non-standard behavior.

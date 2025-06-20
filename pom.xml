@@ -13,7 +13,7 @@
         <arrow.version>18.2.0</arrow.version>
         <duckdb.version>1.2.2.0</duckdb.version>
         <typesafe-config.version>1.4.3</typesafe-config.version>
-        <sql-common.version>0.0.4</sql-common.version>
+        <sql-common.version>0.0.7-snapshot</sql-common.version>
         <calcite.version>1.25.0</calcite.version>
     </properties>
     <dependencies>

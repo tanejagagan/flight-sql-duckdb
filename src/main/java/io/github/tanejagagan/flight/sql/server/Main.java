@@ -55,7 +55,6 @@ public class Main {
         String warehousePath = config.hasPath("warehousePath") ? config.getString("warehousePath") : System.getProperty("user.dir") + "/warehouse";
         String secretKey = config.getString("secretKey");
         String producerId = config.hasPath("producerId") ? config.getString("producerId") : UUID.randomUUID().toString();
-
         if(!checkWarehousePath(warehousePath)) {
             System.out.printf("Warehouse dir does not exist %s. Create the dir to proceed", warehousePath);
         }
