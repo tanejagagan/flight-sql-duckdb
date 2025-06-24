@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.typesafe.config.ConfigFactory;
 import io.github.tanejagagan.flight.sql.common.UnauthorizedException;
 import io.github.tanejagagan.flight.sql.server.SqlAuthorizer;
 import io.github.tanejagagan.sql.commons.ExpressionFactory;
@@ -20,11 +22,11 @@ import java.util.*;
 
 public class SimpleAuthorization implements SqlAuthorizer {
     private record AccessKey(String user, CatalogSchemaTable catalogSchemaTable) { }
-
     private record AccessValue(JsonNode filter, List<String> columns) { }
-
     Map<AccessKey, AccessValue> accessMap = new HashMap<>();
     Set<String> superUsers = new HashSet<>();
+
+    public static final String ACCESS_FILE = "simple-access.json";
 
     public SimpleAuthorization(Map<String, List<String>> userGroupMapping,
                                List<AccessRow> accessRows) {
@@ -46,19 +48,53 @@ public class SimpleAuthorization implements SqlAuthorizer {
             var map = new HashMap<CatalogSchemaTable, AccessValue>();
             groups.forEach(group -> {
                 var _accessRows = groupAccessRowMap.get(group);
-                _accessRows.forEach(accessRow -> {
-                    var key = new CatalogSchemaTable(accessRow.database(), accessRow.schema(), accessRow.tableOrPath(), accessRow.type());
-                    map.compute(key, (k, oldValue) -> {
-                        if (oldValue == null) {
-                            return collapse(accessRow);
-                        } else {
-                            return collapse(accessRow, oldValue);
-                        }
+                if(_accessRows != null) {
+                    _accessRows.forEach(accessRow -> {
+                        var key = new CatalogSchemaTable(accessRow.database(), accessRow.schema(), accessRow.tableOrPath(), accessRow.type());
+                        map.compute(key, (k, oldValue) -> {
+                            if (oldValue == null) {
+                                return collapse(accessRow);
+                            } else {
+                                return collapse(accessRow, oldValue);
+                            }
+                        });
+
                     });
-                });
+                }
             });
             map.forEach((key, value) -> accessMap.put(new AccessKey(user, key), value));
         });
+    }
+
+    public static SqlAuthorizer load() throws IOException {
+        var userGroupMapping = loadUsrGroupMapping();
+        var accessRows = loadAccessRows();
+        return new SimpleAuthorization(userGroupMapping, accessRows);
+    }
+
+    public static List<AccessRow> loadAccessRows() throws IOException {
+        var result = new ArrayList<AccessRow>();
+        try (InputStream inputStream = SimpleAuthorization.class.getResourceAsStream("/" + ACCESS_FILE);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+            ObjectMapper mapper = new ObjectMapper();
+            var line = reader.readLine();
+            var accessRow = mapper.readValue(line, AccessRow.class);
+            result.add(accessRow);
+        }
+        return result;
+    }
+
+    public static Map<String, List<String>> loadUsrGroupMapping() throws IOException {
+        var conf = ConfigFactory.load().getConfig("flight-sql-duckdb");
+        var res = new HashMap<String, List<String>>();
+        var users = conf.getObjectList("users");
+        for (var userConfigObject : users) {
+            var userConfig = userConfigObject.toConfig();
+            var user = userConfig.getString("username");
+            var groups = userConfig.getStringList("groups");
+            res.put(user, groups);
+        }
+        return res;
     }
 
     private AccessValue collapse(AccessRow r1, AccessValue accessValue) {
@@ -89,12 +125,6 @@ public class SimpleAuthorization implements SqlAuthorizer {
         return ExpressionFactory.orFilters(qnode, node);
     }
 
-    public static SqlAuthorizer load() throws IOException {
-        var userGroups = readUserGroups();
-        var accessRows = readAccessRows();
-        return new SimpleAuthorization(userGroups, accessRows);
-    }
-
     @Override
     public JsonNode authorize(String user, String database, String schema, JsonNode query) throws UnauthorizedException {
         if (superUsers.contains(user)) {
@@ -116,7 +146,6 @@ public class SimpleAuthorization implements SqlAuthorizer {
         return addFilerToQuery(query, a.filter());
     }
 
-
     public static void validateForAuthorization(JsonNode jsonNode) throws UnauthorizedException {
 
         var supportedFromType = Set.of("TABLE_FUNCTION", "BASE_TABLE");
@@ -125,7 +154,6 @@ public class SimpleAuthorization implements SqlAuthorizer {
         if (statements.size() != 1) {
             throw new UnauthorizedException("too many statements");
         }
-
         var statement = statements.get(0);
         var statementNode = statement.get("node");
         //
@@ -141,7 +169,6 @@ public class SimpleAuthorization implements SqlAuthorizer {
         var selectList = statementNode.get("select_list");
         var groupExpression = statementNode.get("group_expressions");
         var fromTable = statementNode.get("from_table");
-
         var fromTableType = fromTable.get("type").asText();
         if (!supportedFromType.contains(fromTableType)) {
             throw new UnauthorizedException("Type " + fromTableType + "Not supported");
@@ -155,7 +182,7 @@ public class SimpleAuthorization implements SqlAuthorizer {
             }
         }
 
-        if(fromTable.get("type").asText().equals("BASE_TABLE")) {
+        if (fromTable.get("type").asText().equals("BASE_TABLE")) {
             return;
         }
         var tableFunction = fromTable.get("function");
@@ -163,9 +190,7 @@ public class SimpleAuthorization implements SqlAuthorizer {
         if (!supportedTableFunction.contains(tableFunctionName.toLowerCase())) {
             throw new UnauthorizedException("Function " + fromTableType + "Not supported");
         }
-
     }
-
 
     private boolean hasAccessToColumns(JsonNode query, List<String> accessColumn) {
         return true;
@@ -188,23 +213,20 @@ public class SimpleAuthorization implements SqlAuthorizer {
         return result;
     }
 
-
-    private static Map<String, List<String>> readUserGroups() {
-        return Map.of();
-    }
-
     public static JsonNode addFilerToQuery(JsonNode query, JsonNode toAdd) {
         var qWhereClause = Transformations.getWhereClause(query);
-        var allWhere = ExpressionFactory.andFilters(qWhereClause, toAdd);
+        JsonNode allWhere ;
+        if(qWhereClause == null || qWhereClause instanceof NullNode ) {
+            allWhere = toAdd;
+        } else {
+            allWhere = ExpressionFactory.andFilters(qWhereClause, toAdd);
+        }
         return replaceWhereClause(query, allWhere);
     }
-
 
     private static JsonNode replaceWhereClause(JsonNode query, JsonNode newWhereClause) {
         var statementNode = (ObjectNode) Transformations.getFirstStatementNode(query);
         statementNode.set("where_clause", newWhereClause);
         return query;
     }
-
-
 }

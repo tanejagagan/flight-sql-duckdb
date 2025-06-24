@@ -50,6 +50,18 @@ public class SimpleAuthorizationTest {
         assertTrue(newQueryString.contains("x") && newQueryString.contains("y"));
     }
 
+    @Test
+    public void combineFilterTestNoFilter() throws SQLException, JsonProcessingException {
+        String sql = "select * from t1";
+        String filterToCombiner = "select * from t1 where x = y";
+        var query = Transformations.parseToTree(sql);
+        var toAddQuery = Transformations.parseToTree(filterToCombiner);
+        var toAddFilter = Transformations.getWhereClause(toAddQuery);
+        var newQuery = addFilerToQuery(query, toAddFilter);
+        var newQueryString = Transformations.parseToSql(newQuery);
+        assertTrue(newQueryString.contains("x") && newQueryString.contains("y"));
+    }
+
     @ParameterizedTest()
     @ValueSource(strings = {
             "select * from read_parquet('abc')",

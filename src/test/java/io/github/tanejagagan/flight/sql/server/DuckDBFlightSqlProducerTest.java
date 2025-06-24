@@ -3,6 +3,9 @@ package io.github.tanejagagan.flight.sql.server;
 
 import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.flight.sql.common.Headers;
+import io.github.tanejagagan.flight.sql.common.authorization.AccessRow;
+import io.github.tanejagagan.flight.sql.common.authorization.NOOPAuthorizer;
+import io.github.tanejagagan.flight.sql.common.authorization.SimpleAuthorization;
 import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.github.tanejagagan.sql.commons.util.TestUtils;
@@ -25,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -34,6 +38,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -86,7 +91,8 @@ public class DuckDBFlightSqlProducerTest {
                         new DuckDBFlightSqlProducer(serverLocation,
                                 UUID.randomUUID().toString(),
                                 "change me",
-                                serverAllocator, warehousePath))
+                                serverAllocator, warehousePath, AccessMode.COMPLETE,
+                                new NOOPAuthorizer()))
                 .headerAuthenticator(AuthUtils.getAuthenticator())
                 .build()
                 .start();
@@ -96,6 +102,7 @@ public class DuckDBFlightSqlProducerTest {
                         Map.of(Headers.HEADER_DATABASE, TEST_CATALOG,
                                 Headers.HEADER_SCHEMA, TEST_SCHEMA)))
                 .build());
+
 
     }
 
@@ -145,20 +152,20 @@ public class DuckDBFlightSqlProducerTest {
 
     @Test
     public void testStatementSplittableHive() throws Exception {
-        String[][] hivePartition = {
-                {"dt", "date"},
-                {"p", "string"}
-        };
-        String query = "select count(*) from read_parquet('example/hive_table')";
-        try( var splittableClient = splittableClient(hivePartition)){
-            var flightCallHeaders = new FlightCallHeaders();
-            flightCallHeaders.insert(Headers.HEADER_SPLIT_SIZE, "1");
-            var flightInfo = splittableClient.execute(query, new HeaderCallOption(flightCallHeaders));
-            assertEquals(3, flightInfo.getEndpoints().size());
-            for (var endpoint : flightInfo.getEndpoints()){
-                try (final FlightStream stream = splittableClient.getStream(endpoint.getTicket(), new HeaderCallOption(flightCallHeaders))){
-                    while (stream.next()){
-                        stream.getRoot().contentToTSVString();
+        final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55559);
+        try ( var serverClient = createRestrictedServerClient(new NOOPAuthorizer(), serverLocation )) {
+
+            String query = "select count(*) from read_parquet('example/hive_table', hive_types = {'dt': DATE, 'p': VARCHAR})";
+            try (var splittableClient = splittableAdminClient(serverLocation, serverClient.clientAllocator)) {
+                var flightCallHeaders = new FlightCallHeaders();
+                flightCallHeaders.insert(Headers.HEADER_SPLIT_SIZE, "1");
+                var flightInfo = splittableClient.execute(query, new HeaderCallOption(flightCallHeaders));
+                assertEquals(3, flightInfo.getEndpoints().size());
+                for (var endpoint : flightInfo.getEndpoints()) {
+                    try (final FlightStream stream = splittableClient.getStream(endpoint.getTicket(), new HeaderCallOption(flightCallHeaders))) {
+                        while (stream.next()) {
+                            stream.getRoot().contentToTSVString();
+                        }
                     }
                 }
             }
@@ -167,20 +174,20 @@ public class DuckDBFlightSqlProducerTest {
 
     @Test
     public void testStatementSplittableDelta() throws Exception {
-        String[][] hivePartition = {
-                {"dt", "date"},
-                {"p", "string"}
-        };
-        String query = "select count(*) from read_parquet('example/delta_table')";
-        try( var splittableClient = splittableClient(hivePartition)){
-            var flightCallHeaders = new FlightCallHeaders();
-            flightCallHeaders.insert(Headers.HEADER_SPLIT_SIZE, "1");
-            var flightInfo = splittableClient.execute(query, new HeaderCallOption(flightCallHeaders));
-            assertEquals(17, flightInfo.getEndpoints().size());
-            for (var endpoint : flightInfo.getEndpoints()){
-                try (final FlightStream stream = splittableClient.getStream(endpoint.getTicket(), new HeaderCallOption(flightCallHeaders))){
-                    while (stream.next()){
-                        stream.getRoot().contentToTSVString();
+
+        var serverLocation = Location.forGrpcInsecure(LOCALHOST, 55577);
+        try(var clientServer = createRestrictedServerClient(new NOOPAuthorizer(), serverLocation)) {
+            String query = "select count(*) from read_delta('example/delta_table')";
+            try (var splittableClient = splittableAdminClient(serverLocation, clientServer.clientAllocator)) {
+                var flightCallHeaders = new FlightCallHeaders();
+                flightCallHeaders.insert(Headers.HEADER_SPLIT_SIZE, "1");
+                var flightInfo = splittableClient.execute(query, new HeaderCallOption(flightCallHeaders));
+                assertEquals(8, flightInfo.getEndpoints().size());
+                for (var endpoint : flightInfo.getEndpoints()) {
+                    try (final FlightStream stream = splittableClient.getStream(endpoint.getTicket(), new HeaderCallOption(flightCallHeaders))) {
+                        while (stream.next()) {
+                            stream.getRoot().contentToTSVString();
+                        }
                     }
                 }
             }
@@ -345,6 +352,75 @@ public class DuckDBFlightSqlProducerTest {
         }
     }
 
+    @Test
+    public void testRestrictClientServer() throws Exception {
+        var newServerLocation = Location.forGrpcInsecure(LOCALHOST, 55557);
+        var r = List.of(new AccessRow("restricted", null, null, "example/hive_table/*/*/*.parquet", "TABLE_FUNCTION", List.of(), "p = '1'", null),
+                new AccessRow("admin", null, null, "example/hive_table", "TABLE_FUNCTION", List.of(), "p = '1'", null));
+        var groupMapping = SimpleAuthorization.loadUsrGroupMapping();
+        var authorizer = new SimpleAuthorization(groupMapping, r);
+        try (var serverClient = createRestrictedServerClient(authorizer, newServerLocation)) {
+            String query = "select * from read_parquet('example/hive_table/*/*/*.parquet')";
+            String expectedSql = "select * from read_parquet('example/hive_table/*/*/*.parquet', " +
+                    "hive_partitioning = true," +
+                    "hive_types = {'dt': DATE, 'p': VARCHAR}) where p = '1'";
+            var clientAllocator = serverClient.clientAllocator;
+
+            var client = splittableAdminClient( newServerLocation, clientAllocator);
+            var newFlightInfo = client.execute("select * from read_parquet('example/hive_table', hive_types = {'dt': DATE, 'p': VARCHAR})");
+            try (final FlightStream stream =
+                         client.getStream(newFlightInfo.getEndpoints().get(0).getTicket())) {
+                TestUtils.isEqual(expectedSql, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
+            }
+
+            var restrictSqlClient = serverClient.flightSqlClient;
+            final FlightInfo flightInfo = restrictSqlClient.execute(query);
+
+            try (final FlightStream stream =
+                         restrictSqlClient.getStream(flightInfo.getEndpoints().get(0).getTicket())) {
+                TestUtils.isEqual(expectedSql, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
+            }
+        }
+    }
+
+    record ServerClient(FlightServer flightServer, FlightSqlClient flightSqlClient, RootAllocator clientAllocator) implements Closeable {
+        @Override
+        public void close() {
+            try {
+                flightServer.close();
+                flightSqlClient.close();
+                clientAllocator.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private ServerClient createRestrictedServerClient(SqlAuthorizer authorizer,
+                                                      Location serverLocation) throws IOException {
+
+        var clientAllocator = new RootAllocator();
+        var restrictFlightServer = FlightServer.builder(
+                        serverAllocator,
+                        serverLocation,
+                        new DuckDBFlightSqlProducer(serverLocation,
+                                UUID.randomUUID().toString(),
+                                "change me",
+                                serverAllocator, warehousePath, AccessMode.RESTRICTED, authorizer))
+                .headerAuthenticator(AuthUtils.getAuthenticator())
+                .build()
+                .start();
+
+
+        var restrictSqlClient = new FlightSqlClient(FlightClient.builder(clientAllocator, serverLocation)
+                .intercept(AuthUtils.createClientMiddlewareFactory("restricted_user",
+                        PASSWORD,
+                        Map.of(Headers.HEADER_DATABASE, TEST_CATALOG,
+                                Headers.HEADER_SCHEMA, TEST_SCHEMA)))
+                .build());
+        return new ServerClient(restrictFlightServer, restrictSqlClient, clientAllocator);
+    }
+
     private void testPutStream(String filename) throws SQLException, IOException {
         String query = "select * from generate_series(10)";
         try(DuckDBConnection connection = ConnectionPool.getConnection();
@@ -384,16 +460,13 @@ public class DuckDBFlightSqlProducerTest {
         }
     }
 
-    private FlightSqlClient splittableClient(String[][] hivePartition) {
-        final Location serverLocation = Location.forGrpcInsecure(LOCALHOST, 55556);
-        var partitionSchemaString = Arrays.stream(hivePartition).map(strings -> strings[0] + " " + strings[1]).collect(Collectors.joining(","));
-        return new FlightSqlClient(FlightClient.builder(clientAllocator, serverLocation)
+    private FlightSqlClient splittableAdminClient( Location location, BufferAllocator allocator) {
+        return new FlightSqlClient(FlightClient.builder(allocator, location)
                 .intercept(AuthUtils.createClientMiddlewareFactory(USER,
                         PASSWORD,
                         Map.of(Headers.HEADER_DATABASE, TEST_CATALOG,
                                 Headers.HEADER_SCHEMA, TEST_SCHEMA,
-                                Headers.HEADER_PARALLELIZE, "true",
-                                Headers.HEADER_PARTITION_DATA_TYPES, partitionSchemaString)))
+                                Headers.HEADER_PARALLELIZE, "true")))
                 .build());
     }
 }

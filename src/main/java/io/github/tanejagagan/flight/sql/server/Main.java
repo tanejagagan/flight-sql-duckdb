@@ -4,6 +4,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
+import io.github.tanejagagan.flight.sql.common.authorization.NOOPAuthorizer;
 import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
 import org.apache.arrow.flight.FlightServer;
 import org.apache.arrow.flight.Location;
@@ -58,8 +59,9 @@ public class Main {
         if(!checkWarehousePath(warehousePath)) {
             System.out.printf("Warehouse dir does not exist %s. Create the dir to proceed", warehousePath);
         }
+        AccessMode accessMode = config.hasPath("accessMode") ? AccessMode.valueOf(config.getString("accessNode")) : AccessMode.COMPLETE;
         BufferAllocator allocator = new RootAllocator();
-        var producer = new DuckDBFlightSqlProducer(location, producerId, secretKey, allocator ,warehousePath);
+        var producer = new DuckDBFlightSqlProducer(location, producerId, secretKey, allocator ,warehousePath, accessMode, new NOOPAuthorizer());
         var certStream =  getInputStreamForResource(serverCertLocation);
         var keyStream = getInputStreamForResource(keystoreLocation);
         FlightServer flightServer = FlightServer.builder(allocator, location, producer)

@@ -1,1 +1,0 @@
-{ "group" : "groupX", "database": "dbX", "schema" : "schemaX",  "table" : "tableX", "columns" : ["a", "b", "c"],  "filter" : "x = y" }

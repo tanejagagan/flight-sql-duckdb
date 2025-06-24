@@ -1,0 +1,1 @@
+{ "group" : "restricted", "database": "", "schema" : "main",  "tableOrPath" : "example/hive_table/*/*/*.parquet", "columns" : ["a", "b", "c"],  "filter" : "p = '1'" }
