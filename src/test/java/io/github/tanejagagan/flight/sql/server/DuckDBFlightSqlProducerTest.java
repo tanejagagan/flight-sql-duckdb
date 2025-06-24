@@ -366,11 +366,12 @@ public class DuckDBFlightSqlProducerTest {
                     "hive_types = {'dt': DATE, 'p': VARCHAR}) where p = '1'";
             var clientAllocator = serverClient.clientAllocator;
 
-            var client = splittableAdminClient( newServerLocation, clientAllocator);
-            var newFlightInfo = client.execute("select * from read_parquet('example/hive_table', hive_types = {'dt': DATE, 'p': VARCHAR})");
-            try (final FlightStream stream =
-                         client.getStream(newFlightInfo.getEndpoints().get(0).getTicket())) {
-                TestUtils.isEqual(expectedSql, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
+            try (var client = splittableAdminClient( newServerLocation, clientAllocator)) {
+                var newFlightInfo = client.execute("select * from read_parquet('example/hive_table', hive_types = {'dt': DATE, 'p': VARCHAR})");
+                try (final FlightStream stream =
+                             client.getStream(newFlightInfo.getEndpoints().get(0).getTicket())) {
+                    TestUtils.isEqual(expectedSql, clientAllocator, FlightStreamReader.of(stream, clientAllocator));
+                }
             }
 
             var restrictSqlClient = serverClient.flightSqlClient;
