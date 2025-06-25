@@ -2,19 +2,21 @@ package io.github.tanejagagan.flight.sql.common.util;
 
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigObject;
+import io.github.tanejagagan.flight.sql.server.auth2.GeneratedJWTTokenAuthenticator;
+import io.jsonwebtoken.security.Keys;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.auth2.Auth2Constants;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
-import org.apache.arrow.flight.auth2.GeneratedBearerTokenAuthenticator;
 
+import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.*;
 
 public class AuthUtils {
-
 
     public static String generateBasicAuthHeader(String username, String password) {
         byte[] up = Base64.getEncoder().encode((username + ":" + password).getBytes(StandardCharsets.UTF_8));
@@ -22,15 +24,24 @@ public class AuthUtils {
                 new String(up);
     }
 
-    public static CallHeaderAuthenticator getAuthenticator(Config config) {
+    public static CallHeaderAuthenticator getAuthenticator(Config config) throws NoSuchAlgorithmException {
         BasicCallHeaderAuthenticator.CredentialValidator validator = createCredentialValidator(config);
         CallHeaderAuthenticator authenticator = new BasicCallHeaderAuthenticator(validator);
-        return new GeneratedBearerTokenAuthenticator(authenticator);
+        var secretKey = generateRandoSecretKey();
+        return new GeneratedJWTTokenAuthenticator(authenticator, secretKey, 60);
     }
 
-    public static CallHeaderAuthenticator getAuthenticator() {
+    public static CallHeaderAuthenticator getAuthenticator() throws NoSuchAlgorithmException {
         CallHeaderAuthenticator authenticator = new BasicCallHeaderAuthenticator(NO_AUTH_CREDENTIAL_VALIDATOR);
-        return new GeneratedBearerTokenAuthenticator(authenticator);
+        var secretKey = generateRandoSecretKey();
+        return new GeneratedJWTTokenAuthenticator(authenticator, secretKey, 60);
+    }
+
+    private static SecretKey generateRandoSecretKey() throws NoSuchAlgorithmException {
+        var secureKeySize = 32;
+        byte[] secureRandomBytes = new byte[secureKeySize];
+        SecureRandom.getInstanceStrong().nextBytes(secureRandomBytes);
+        return Keys.hmacShaKeyFor(secureRandomBytes);
     }
 
     public static FlightClientMiddleware.Factory createClientMiddlewareFactory(String username,

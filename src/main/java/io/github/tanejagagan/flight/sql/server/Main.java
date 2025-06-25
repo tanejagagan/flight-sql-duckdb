@@ -2,7 +2,6 @@ package io.github.tanejagagan.flight.sql.server;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
-import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import io.github.tanejagagan.flight.sql.common.authorization.NOOPAuthorizer;
 import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
@@ -14,6 +13,7 @@ import org.apache.arrow.memory.RootAllocator;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
@@ -29,7 +29,7 @@ public class Main {
         private List<String> configs;
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
         Args argv = new Args();
         JCommander.newBuilder()
                 .addObject(argv)
@@ -61,7 +61,7 @@ public class Main {
         }
         AccessMode accessMode = config.hasPath("accessMode") ? AccessMode.valueOf(config.getString("accessNode")) : AccessMode.COMPLETE;
         BufferAllocator allocator = new RootAllocator();
-        var producer = new DuckDBFlightSqlProducer(location, producerId, secretKey, allocator ,warehousePath, accessMode, new NOOPAuthorizer());
+        var producer = new DuckDBFlightSqlProducer(location, producerId, secretKey, allocator, warehousePath, accessMode, new NOOPAuthorizer());
         var certStream =  getInputStreamForResource(serverCertLocation);
         var keyStream = getInputStreamForResource(keystoreLocation);
         FlightServer flightServer = FlightServer.builder(allocator, location, producer)

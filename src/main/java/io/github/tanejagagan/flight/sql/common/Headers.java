@@ -20,7 +20,6 @@ public class Headers {
     public static final String HEADER_SCHEMA = "schema";
     public static final String HEADER_SPLIT_SIZE = "split_size";
     public static final String HEADER_PARALLELIZE = "parallelize";
-    public static final String HEADER_PARTITION_DATA_TYPES = "partition_data_types";
     public static final String HEADER_DATA_SCHEMA = "data_schema";
 
     public static <T> T getValue(FlightProducer.CallContext context, String key,  T defaultValue, Class<T> tClass) {

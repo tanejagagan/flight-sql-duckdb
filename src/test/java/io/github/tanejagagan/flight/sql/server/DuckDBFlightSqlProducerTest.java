@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -41,7 +42,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -398,7 +398,7 @@ public class DuckDBFlightSqlProducerTest {
     }
 
     private ServerClient createRestrictedServerClient(SqlAuthorizer authorizer,
-                                                      Location serverLocation) throws IOException {
+                                                      Location serverLocation) throws IOException, NoSuchAlgorithmException {
 
         var clientAllocator = new RootAllocator();
         var restrictFlightServer = FlightServer.builder(

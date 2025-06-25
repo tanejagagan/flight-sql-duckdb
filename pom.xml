@@ -92,9 +92,12 @@
             <artifactId>config</artifactId>
             <version>${typesafe-config.version}</version>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.calcite.avatica/avatica-core -->
-        <!-- https://mvnrepository.com/artifact/org.apache.calcite.avatica/avatica -->
-
+        <!-- https://mvnrepository.com/artifact/io.jsonwebtoken/jjwt -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt</artifactId>
+            <version>0.12.6</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
