@@ -9,6 +9,7 @@ import java.util.function.Function;
 
 public class Headers {
 
+    public static final int DEFAULT_ARROW_FETCH_SIZE = 10000;
     private static final Map<Class<?>, Function<String, Object>> EXTRACTOR = Map.of(
             Integer.class, Integer::parseInt,
             Long.class, Long::parseLong,
@@ -33,5 +34,17 @@ public class Headers {
             throw new UnknownFormatConversionException(tClass.getName());
         }
         return (T) fn.apply(fromHeaderString);
+    }
+
+    public static <T> T getValue(com.sun.net.httpserver.Headers headers, String key, T defaultValue, Class<T> tClass) {
+        var fromHeaderString  = headers.get(key);
+        if(fromHeaderString == null) {
+            return defaultValue;
+        }
+        var fn = EXTRACTOR.get(tClass);
+        if(fn == null) {
+            throw new UnknownFormatConversionException(tClass.getName());
+        }
+        return (T) fn.apply(fromHeaderString.get(0));
     }
 }

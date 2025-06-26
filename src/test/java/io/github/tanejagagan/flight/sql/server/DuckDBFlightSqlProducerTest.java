@@ -38,7 +38,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -140,7 +139,7 @@ public class DuckDBFlightSqlProducerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"SELECT * FROM generate_series(" + DuckDBFlightSqlProducer.DEFAULT_ARROW_BATCH_SIZE * 3 + ")"
+    @ValueSource(strings = {"SELECT * FROM generate_series(" + Headers.DEFAULT_ARROW_FETCH_SIZE * 3 + ")"
     })
     public void testStatementMultiBatch(String query) throws Exception {
         final FlightInfo flightInfo = sqlClient.execute(query);

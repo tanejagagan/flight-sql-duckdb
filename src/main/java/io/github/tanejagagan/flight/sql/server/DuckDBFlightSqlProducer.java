@@ -64,7 +64,6 @@ import static org.duckdb.DuckDBConnection.DEFAULT_SCHEMA;
  */
 public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable {
     protected static final Calendar DEFAULT_CALENDAR = JdbcToArrowUtils.getUtcCalendar();
-    public static final int DEFAULT_ARROW_BATCH_SIZE = 10000;
     public static long DEFAULT_SPLIT_SIZE = 128 * 1024 * 1024;
     private final AccessMode accessMode;
     ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
@@ -683,13 +682,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     }
 
     private static int getBatchSize(final CallContext context) {
-        CallHeaders headers = context.getMiddleware(FlightConstants.HEADER_KEY).headers();
-        String batchSize = headers.get(Headers.HEADER_FETCH_SIZE);
-        if(batchSize == null) {
-            return DEFAULT_ARROW_BATCH_SIZE;
-        } else {
-            return Integer.parseInt(batchSize);
-        }
+        return Headers.getValue(context, Headers.HEADER_FETCH_SIZE, Headers.DEFAULT_ARROW_FETCH_SIZE, Integer.class);
     }
 
     private interface ResultSetSupplierFromConnection {
