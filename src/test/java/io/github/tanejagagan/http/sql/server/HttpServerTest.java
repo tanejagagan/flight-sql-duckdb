@@ -23,7 +23,7 @@ public class HttpServerTest {
 
     @BeforeAll
     public static void setup() throws IOException {
-        HttpServer.main(new String[0]);
+        Main.main(new String[0]);
         client = HttpClient.newHttpClient();
     }
 
