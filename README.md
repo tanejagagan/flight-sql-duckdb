@@ -8,14 +8,24 @@
 [<img src="https://img.shields.io/badge/PyPI-Arrow%20ADBC%20Flight%20SQL%20driver-blue?logo=PyPI">](https://pypi.org/project/adbc-driver-flightsql/)
 [<img src="https://img.shields.io/badge/PyPI-SQLFlite%20Ibis%20Backend-blue?logo=PyPI">](https://pypi.org/project/ibis-sqlflite/)
 [<img src="https://img.shields.io/badge/PyPI-SQLFlite%20SQLAlchemy%20Dialect-blue?logo=PyPI">](https://pypi.org/project/sqlalchemy-sqlflite-adbc-dialect/)
-<br> Flight Sql Server with DuckDB backend lets you run DuckDB remotely and let multiple user connect to it remotely with flight jdbc driver.
-<br> It's very similar to https://github.com/voltrondata/sqlflite <br> But written in Java which for those comfortable writing code in java.
-This support all the clients including JDBC, ADBC Python flight sql driver as well as sqlflite_client CLI tool
+<br> Flight Sql Server/ Http Sql Server with DuckDB backend lets you run DuckDB remotely and let multiple user connect to it remotely with flight jdbc driver or over Http using arrow extension.
+<br> It support all the clients including JDBC, ADBC Python flight sql driver as well as sqlflite_client CLI tool
+
 ## Dev Setup
 Requirement
 JDK 17 or 21
 
-### Getting started with Docker
+### Getting started in HTTP Mode
+- Export maven options
+  `export MAVEN_OPTS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED"`
+- Start the client which will display the result
+  `./mvnw clean compile  exec:java -Dexec.mainClass="io.github.tanejagagan.http.sql.server.Main"`
+ ## Connecting with DuckDB
+- INSTALL arrow FROM community;
+- LOAD arrow;
+- select * from read_arrow(concat('http://localhost:8080/query?q=', url_encode('select 1, 2, 3')));
+
+### Getting started with Docker in Arrow GRPC Mode
 - Build the docker image with
   `./mvnw clean package -DskipTests jib:dockerBuild`
 - Start the container with `example/data` mounted to the container

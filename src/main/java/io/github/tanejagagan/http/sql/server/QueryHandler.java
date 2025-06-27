@@ -35,17 +35,16 @@ public class QueryHandler implements HttpHandler {
     public void handle(HttpExchange exchange) throws IOException {
         try {
             handleInternal(exchange);
-        } catch (InternalErrorException e) {
-            logger.atError().setCause(e).log("Error");
-            var msg = e.getMessage().getBytes();
-            exchange.sendResponseHeaders(e.errorCode, msg.length);
-            var os = exchange.getResponseBody();
-            os.write(msg);
         } catch (HttpException e) {
+            if( e instanceof InternalErrorException  i) {
+                logger.atError().setCause(e).log("Error");
+            }
             var msg = e.getMessage().getBytes();
-            var os = exchange.getResponseBody();
-            exchange.sendResponseHeaders(e.errorCode, msg.length);
-            os.write(msg);
+            try( var os = exchange.getResponseBody()) {
+                exchange.sendResponseHeaders(e.errorCode, msg.length);
+                os.write(msg);
+                os.flush();
+            }
         }
     }
 
