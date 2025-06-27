@@ -15,17 +15,17 @@
 Requirement
 JDK 17 or 21
 
-### Getting started in HTTP Mode
+## Getting started in HTTP Mode
 - Export maven options
   `export MAVEN_OPTS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED"`
 - Start the client which will display the result
   `./mvnw clean compile  exec:java -Dexec.mainClass="io.github.tanejagagan.http.sql.server.Main"`
- ## Connecting with DuckDB
+ ### Connecting with DuckDB
 - INSTALL arrow FROM community;
 - LOAD arrow;
 - select * from read_arrow(concat('http://localhost:8080/query?q=', url_encode('select 1, 2, 3')));
 
-### Getting started with Docker in Arrow GRPC Mode
+## Getting started with Docker in Arrow GRPC Mode
 - Build the docker image with
   `./mvnw clean package -DskipTests jib:dockerBuild`
 - Start the container with `example/data` mounted to the container
@@ -34,7 +34,7 @@ JDK 17 or 21
 ### Connecting to the server via JDBC
 Download the [Apache Arrow Flight SQL JDBC driver](https://search.maven.org/search?q=a:flight-sql-jdbc-driver)
 
-### Support functionality
+### Supported functionality
 1. Database and schema specified as part of connection url. Passed to server as header database and schema.
 2. Fetch size can be specified. It's passed to the server in header fetch_size.
 3. Bulk write to parquet file using bulk upload functionality. Idea is to to bulk upload and then add those files to metadata.
