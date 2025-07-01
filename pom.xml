@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.tanejagagan</groupId>
-    <artifactId>flight-sql-duckdb</artifactId>
+    <artifactId>flight-sql</artifactId>
     <version>0.0.3</version>
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -15,6 +15,7 @@
         <typesafe-config.version>1.4.3</typesafe-config.version>
         <sql-common.version>0.0.7</sql-common.version>
         <calcite.version>1.25.0</calcite.version>
+        <helidon.version>4.2.3</helidon.version>
     </properties>
     <dependencies>
         <dependency>
@@ -74,6 +75,16 @@
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-c-data</artifactId>
             <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.webserver</groupId>
+            <artifactId>helidon-webserver</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.config</groupId>
+            <artifactId>helidon-config-hocon</artifactId>
+            <version>${helidon.version}</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
