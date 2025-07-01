@@ -77,7 +77,7 @@ public class Main {
                         var b = routing.register("/query", new QueryService(new RootAllocator()))
                                 .register("/login", new LoginService(appConfig, secretKey));
                         if("jwt".equals(auth)) {
-                            b.addFilter(new JwtAuthenticationFilter("query", appConfig, secretKey));
+                            b.addFilter(new JwtAuthenticationFilter("/query", appConfig, secretKey));
                         }
                 })
                 .port(port)
