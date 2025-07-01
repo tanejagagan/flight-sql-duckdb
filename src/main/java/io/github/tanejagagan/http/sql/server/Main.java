@@ -1,16 +1,18 @@
 
-package io.github.tanejagagan.http.sql.x;
+package io.github.tanejagagan.http.sql.server;
 
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.typesafe.config.ConfigFactory;
+import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
 import io.helidon.config.Config;
 import io.helidon.logging.common.LogConfig;
 import io.helidon.webserver.WebServer;
 import io.helidon.webserver.http.HttpRouting;
 import org.apache.arrow.memory.RootAllocator;
 
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
 
@@ -39,7 +41,7 @@ public class Main {
      * Application main entry point.
      * @param args command line arguments.
      */
-    public static void main(String[] args) {
+    public static void main(String[] args) throws NoSuchAlgorithmException {
         
         // load logging configuration
         LogConfig.configureRuntime();
@@ -66,11 +68,18 @@ public class Main {
         var commandlineConfig = ConfigFactory.parseMap(configMap);
         var appConfig = commandlineConfig.withFallback(ConfigFactory.load().getConfig(CONFIG_PATH));
         var port = Integer.parseInt(appConfig.getString("port"));
+        var auth = appConfig.hasPath("auth") ? appConfig.getString("auth") : null;
 
-
+        var secretKey = AuthUtils.generateRandoSecretKey();
         WebServer server = WebServer.builder()
                 .config(helidonConfig.get("flight-sql"))
-                .routing(Main::routing)
+                .routing( routing -> {
+                        var b = routing.register("/query", new QueryService(new RootAllocator()))
+                                .register("/login", new LoginService(appConfig, secretKey));
+                        if("jwt".equals(auth)) {
+                            b.addFilter(new JwtAuthenticationFilter("/query", appConfig, secretKey));
+                        }
+                })
                 .port(port)
                 .build()
                 .start();
@@ -78,13 +87,5 @@ public class Main {
 
         System.out.println("WEB server is up! http://localhost:" + server.port() + "/simple-greet");
 
-    }
-
-
-    /**
-     * Updates HTTP Routing.
-     */
-    static void routing(HttpRouting.Builder routing) {
-        routing.register("query", new QueryService(new RootAllocator()));
     }
 }

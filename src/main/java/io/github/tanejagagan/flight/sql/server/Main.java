@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public class Main {
 
-    public static final String CONFIG_PATH = "flight-sql-duckdb";
+    public static final String CONFIG_PATH = "flight-sql";
 
     public static class Args {
         @Parameter(names = {"--conf"}, description = "Configurations" )

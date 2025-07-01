@@ -1,6 +1,7 @@
 package io.github.tanejagagan.flight.sql.server.auth2;
 
 import com.google.common.base.Strings;
+import com.typesafe.config.Config;
 import io.grpc.Metadata;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
@@ -14,21 +15,31 @@ import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import org.apache.arrow.flight.grpc.MetadataAdapter;
 
 import javax.crypto.SecretKey;
+import java.time.Duration;
 import java.util.Calendar;
 import java.util.Date;
 
 public class GeneratedJWTTokenAuthenticator extends BearerTokenAuthenticator {
     private final SecretKey key;
-    private final int timeMinutes;
+    private final Duration timeMinutes;
     JwtParser jwtParser;
 
-    public GeneratedJWTTokenAuthenticator(CallHeaderAuthenticator initialAuthenticator, SecretKey key, int timeoutMinutes) {
+    public GeneratedJWTTokenAuthenticator(CallHeaderAuthenticator initialAuthenticator, SecretKey key, Config config) {
         super(initialAuthenticator);
         this.key = key;
         this.jwtParser = Jwts.parser()     // (1)
                 .verifyWith(key)      //     or a constant key used to verify all signed JWTs
                 .build();
-        this.timeMinutes = timeoutMinutes;
+        this.timeMinutes = config.getDuration("jwt.token.expiration");
+    }
+
+    public GeneratedJWTTokenAuthenticator(CallHeaderAuthenticator initialAuthenticator, SecretKey key) {
+        super(initialAuthenticator);
+        this.key = key;
+        this.jwtParser = Jwts.parser()     // (1)
+                .verifyWith(key)      //     or a constant key used to verify all signed JWTs
+                .build();
+        this.timeMinutes = Duration.ofMinutes(60);
     }
 
     @Override
@@ -44,7 +55,7 @@ public class GeneratedJWTTokenAuthenticator extends BearerTokenAuthenticator {
         final AuthResult authResultWithBearerToken;
         if (Strings.isNullOrEmpty(bearerToken)) {
             Calendar expiration = Calendar.getInstance();
-            expiration.add(Calendar.MINUTE, timeMinutes);
+            expiration.add(Calendar.MINUTE, (int)timeMinutes.toMinutes());
             String jwt = Jwts.builder()
                     .subject(authResult.getPeerIdentity())
                     .expiration(expiration.getTime())

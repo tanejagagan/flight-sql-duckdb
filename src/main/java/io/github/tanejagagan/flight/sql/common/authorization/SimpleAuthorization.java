@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.typesafe.config.ConfigFactory;
 import io.github.tanejagagan.flight.sql.common.UnauthorizedException;
+import io.github.tanejagagan.flight.sql.server.Main;
 import io.github.tanejagagan.flight.sql.server.SqlAuthorizer;
 import io.github.tanejagagan.sql.commons.ExpressionFactory;
 import io.github.tanejagagan.sql.commons.Transformations;
@@ -85,7 +86,7 @@ public class SimpleAuthorization implements SqlAuthorizer {
     }
 
     public static Map<String, List<String>> loadUsrGroupMapping() throws IOException {
-        var conf = ConfigFactory.load().getConfig("flight-sql-duckdb");
+        var conf = ConfigFactory.load().getConfig(Main.CONFIG_PATH);
         var res = new HashMap<String, List<String>>();
         var users = conf.getObjectList("users");
         for (var userConfigObject : users) {

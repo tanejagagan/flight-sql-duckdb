@@ -28,16 +28,16 @@ public class AuthUtils {
         BasicCallHeaderAuthenticator.CredentialValidator validator = createCredentialValidator(config);
         CallHeaderAuthenticator authenticator = new BasicCallHeaderAuthenticator(validator);
         var secretKey = generateRandoSecretKey();
-        return new GeneratedJWTTokenAuthenticator(authenticator, secretKey, 60);
+        return new GeneratedJWTTokenAuthenticator( authenticator, secretKey, config);
     }
 
     public static CallHeaderAuthenticator getAuthenticator() throws NoSuchAlgorithmException {
         CallHeaderAuthenticator authenticator = new BasicCallHeaderAuthenticator(NO_AUTH_CREDENTIAL_VALIDATOR);
         var secretKey = generateRandoSecretKey();
-        return new GeneratedJWTTokenAuthenticator(authenticator, secretKey, 60);
+        return new GeneratedJWTTokenAuthenticator(authenticator, secretKey);
     }
 
-    private static SecretKey generateRandoSecretKey() throws NoSuchAlgorithmException {
+    public static SecretKey generateRandoSecretKey() throws NoSuchAlgorithmException {
         var secureKeySize = 32;
         byte[] secureRandomBytes = new byte[secureKeySize];
         SecureRandom.getInstanceStrong().nextBytes(secureRandomBytes);
@@ -79,11 +79,11 @@ public class AuthUtils {
         };
     }
 
-    private static  BasicCallHeaderAuthenticator.CredentialValidator createCredentialValidator(Config config) {
+    public static BasicCallHeaderAuthenticator.CredentialValidator createCredentialValidator(Config config) {
         List<? extends ConfigObject> users = config.getObjectList("users");
         Map<String, String> passwords = new HashMap<>();
         users.forEach( o -> {
-            String name = o.toConfig().getString("name");
+            String name = o.toConfig().getString("username");
             String password = o.toConfig().getString("password");
             passwords.put(name, password);
         });
