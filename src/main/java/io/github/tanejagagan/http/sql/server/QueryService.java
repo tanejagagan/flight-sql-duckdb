@@ -33,7 +33,15 @@ public class QueryService implements HttpService {
     @Override
     public void routing(HttpRules rules) {
         rules.get("/", this::handleGet)
-                .post("/", this::handlePost);
+                .post("/", this::handlePost)
+                .head("/", this::handleHead);
+    }
+
+    private void handleHead(ServerRequest serverRequest, ServerResponse serverResponse) {
+        serverResponse.headers()
+                .set(HeaderNames.CONTENT_ENCODING, HeaderValues.TRANSFER_ENCODING_CHUNKED.values());
+        serverResponse.status(Status.OK_200);
+        serverResponse.send();
     }
 
     private void handleGet(ServerRequest request,

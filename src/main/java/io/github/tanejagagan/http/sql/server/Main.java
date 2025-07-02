@@ -9,7 +9,6 @@ import io.github.tanejagagan.flight.sql.common.util.AuthUtils;
 import io.helidon.config.Config;
 import io.helidon.logging.common.LogConfig;
 import io.helidon.webserver.WebServer;
-import io.helidon.webserver.http.HttpRouting;
 import org.apache.arrow.memory.RootAllocator;
 
 import java.security.NoSuchAlgorithmException;
@@ -69,23 +68,24 @@ public class Main {
         var appConfig = commandlineConfig.withFallback(ConfigFactory.load().getConfig(CONFIG_PATH));
         var port = Integer.parseInt(appConfig.getString("port"));
         var auth = appConfig.hasPath("auth") ? appConfig.getString("auth") : null;
-
         var secretKey = AuthUtils.generateRandoSecretKey();
         WebServer server = WebServer.builder()
                 .config(helidonConfig.get("flight-sql"))
-                .routing( routing -> {
-                        var b = routing.register("/query", new QueryService(new RootAllocator()))
-                                .register("/login", new LoginService(appConfig, secretKey));
-                        if("jwt".equals(auth)) {
-                            b.addFilter(new JwtAuthenticationFilter("/query", appConfig, secretKey));
-                        }
+                .routing(routing -> {
+                    var b = routing.register("/query", new QueryService(new RootAllocator()))
+                            .register("/login", new LoginService(appConfig, secretKey));
+                    if ("jwt".equals(auth)) {
+                        b.addFilter(new JwtAuthenticationFilter("/query", appConfig, secretKey));
+                    }
                 })
                 .port(port)
                 .build()
                 .start();
 
-
-        System.out.println("WEB server is up! http://localhost:" + server.port() + "/simple-greet");
-
+        var builder = new StringBuilder();
+        String url = "http://localhost:" + server.port();
+        String msg = "WEB server is up! " + url;
+        builder.append(msg);
+        System.out.println(builder.toString());
     }
 }

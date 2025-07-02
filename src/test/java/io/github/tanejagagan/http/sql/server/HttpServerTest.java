@@ -1,6 +1,5 @@
 package io.github.tanejagagan.http.sql.server;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.github.tanejagagan.sql.commons.util.TestUtils;
@@ -35,6 +34,8 @@ public class HttpServerTest {
         client = HttpClient.newHttpClient();
         String[] args = {"--conf", "port=8081", "--conf", "auth=jwt"};
         Main.main(args);
+        String[] sqls = {"INSTALL arrow FROM community", "LOAD arrow"};
+        ConnectionPool.executeBatch(sqls);
     }
 
     @Test
@@ -89,7 +90,7 @@ public class HttpServerTest {
         var request = HttpRequest.newBuilder(URI.create("http://localhost:8081/query"))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .header(HeaderValues.ACCEPT_JSON.name(), HeaderValues.ACCEPT_JSON.values())
-                .header(HeaderNames.AUTHORIZATION.defaultCase(), "Bearer "  + jwt)
+                .header(HeaderNames.AUTHORIZATION.defaultCase(), "Bearer " + jwt)
                 .build();
         var inputStreamResponse = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         try (var allocator = new RootAllocator();
@@ -100,6 +101,13 @@ public class HttpServerTest {
 
     @Test
     public void testWithDuckDB() throws IOException, InterruptedException {
+        String viewSql = "select * from read_arrow(concat('http://localhost:8080/query?q=',url_encode('select 1')))";
+
+        ConnectionPool.execute(viewSql);
+    }
+
+    @Test
+    public void testWithDuckDBAuthorized() throws IOException, InterruptedException {
         var loginRequest = HttpRequest.newBuilder(URI.create("http://localhost:8081/login"))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(new LoginObject("admin", "admin"))))
                 .header(HeaderValues.ACCEPT_JSON.name(), HeaderValues.ACCEPT_JSON.values()).build();
@@ -107,17 +115,15 @@ public class HttpServerTest {
         var httpAuthSql = "CREATE SECRET http_auth (\n" +
                 "    TYPE http,\n" +
                 "    EXTRA_HTTP_HEADERS MAP {\n" +
-                "        'Authorization': 'Bearer "  +  jwtResponse.body() +  "'\n" +
+                "        'Authorization': 'Bearer " + jwtResponse.body() + "'\n" +
                 "    }\n" +
                 ")";
         System.out.println(httpAuthSql);
-        //String viewSql = "select concat('http://localhost:8081/query?q=', url_encode('select * from generate_series(10)')))";
-        String viewSql = "select * from read_arrow(concat('http://localhost:59307/query?q=',url_encode('select 1')))";
+        String viewSql = "select * from read_arrow(concat('http://localhost:8081/query?q=',url_encode('select 1')))";
         String[] sqls = {"INSTALL arrow FROM community", "LOAD arrow"};
         ConnectionPool.executeBatch(sqls);
-        //ConnectionPool.execute(httpAuthSql);
+        ConnectionPool.execute(httpAuthSql);
         ConnectionPool.execute(viewSql);
-        //ConnectionPool.printResult("select * from X");
     }
 
     @Test
