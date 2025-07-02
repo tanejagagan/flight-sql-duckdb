@@ -1,5 +1,6 @@
 package io.github.tanejagagan.http.sql.server;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.github.tanejagagan.sql.commons.util.TestUtils;
@@ -20,6 +21,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -134,5 +137,17 @@ public class HttpServerTest {
         var inputStreamResponse = client.send(request, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, inputStreamResponse.statusCode());
         System.out.println(inputStreamResponse.body());
+    }
+
+    @Test
+    public void testPlanning() throws IOException, InterruptedException {
+        String query = "select count(*) from read_parquet('example/hive_table/*/*/*.parquet', hive_types = {'dt': DATE, 'p': VARCHAR})";
+        var body = objectMapper.writeValueAsBytes(new QueryObject(query));
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:8080/plan"))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .header(HeaderValues.ACCEPT_JSON.name(), HeaderValues.ACCEPT_JSON.values()).build();
+        var inputStreamResponse = client.send(request, HttpResponse.BodyHandlers.ofString());
+        var res = objectMapper.readValue(inputStreamResponse.body(), Split[].class);
+        assertEquals(1, res.length);
     }
 }

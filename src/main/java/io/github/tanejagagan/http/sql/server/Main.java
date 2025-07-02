@@ -69,11 +69,14 @@ public class Main {
         var port = Integer.parseInt(appConfig.getString("port"));
         var auth = appConfig.hasPath("auth") ? appConfig.getString("auth") : null;
         var secretKey = AuthUtils.generateRandoSecretKey();
+        var allocator = new RootAllocator();
+        String location = "http://localhost:" + port;
         WebServer server = WebServer.builder()
                 .config(helidonConfig.get("flight-sql"))
                 .routing(routing -> {
-                    var b = routing.register("/query", new QueryService(new RootAllocator()))
-                            .register("/login", new LoginService(appConfig, secretKey));
+                    var b = routing.register("/query", new QueryService(allocator))
+                            .register("/login", new LoginService(appConfig, secretKey))
+                            .register("/plan", new PlaningService(location, allocator));
                     if ("jwt".equals(auth)) {
                         b.addFilter(new JwtAuthenticationFilter("/query", appConfig, secretKey));
                     }
