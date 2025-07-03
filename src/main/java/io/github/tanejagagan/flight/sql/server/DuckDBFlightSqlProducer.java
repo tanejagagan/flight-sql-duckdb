@@ -3,9 +3,6 @@ package io.github.tanejagagan.flight.sql.server;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalListener;
@@ -16,7 +13,6 @@ import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.flight.sql.common.UnauthorizedException;
 import io.github.tanejagagan.flight.sql.common.authorization.NOOPAuthorizer;
 import io.dazzleduck.sql.commons.ConnectionPool;
-import io.dazzleduck.sql.commons.ExpressionFactory;
 import io.dazzleduck.sql.commons.FileStatus;
 import io.dazzleduck.sql.commons.Transformations;
 import io.dazzleduck.sql.commons.planner.SplitPlanner;
@@ -63,7 +59,6 @@ import static org.duckdb.DuckDBConnection.DEFAULT_SCHEMA;
  */
 public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable {
     protected static final Calendar DEFAULT_CALENDAR = JdbcToArrowUtils.getUtcCalendar();
-    public static long DEFAULT_SPLIT_SIZE = 128 * 1024 * 1024;
     private final AccessMode accessMode;
     ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final static Logger logger = LoggerFactory.getLogger(DuckDBFlightSqlProducer.class);
@@ -773,7 +768,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             var splits = SplitPlanner.getSplits(tree, splitSize);
             var list = splits.stream().map(split -> {
                 var copy = tree.deepCopy();
-                replaceFromClause(copy, split.stream().map(FileStatus::fileName).toArray(String[]::new));
+                SplitPlanner.replacePathInFromClause(copy, split.stream().map(FileStatus::fileName).toArray(String[]::new));
                 try {
                     var sql = Transformations.parseToSql(copy);
                     StatementHandle handle = newStatementHandle(sql);
@@ -813,28 +808,13 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
     }
 
 
-    public static void replaceFromClause(JsonNode tree, String[] paths) {
-        var formatToFunction = Map.of("read_delta", "read_parquet");
-        var format = Transformations.getTableFunction(tree);
-        var functionName = formatToFunction.getOrDefault(format, format);
-        var from = (ObjectNode) Transformations.getFirstStatementNode(tree).get("from_table");
-        var listChildren = new ArrayNode(JsonNodeFactory.instance);
-        for (String path : paths) {
-            listChildren.add(ExpressionFactory.constant(path));
-        }
-        var listFunction = ExpressionFactory.createFunction("list_value", "main", "", listChildren);
-        var parquetChildren = new ArrayNode(JsonNodeFactory.instance);
-        parquetChildren.add(listFunction);
-        var readParquetFunction = ExpressionFactory.createFunction(functionName, "", "", parquetChildren);
-        from.set("function", readParquetFunction);
-    }
 
     private static boolean hasAggregation(JsonNode jsonNode) {
         return false;
     }
 
     private static long getSplitSize(JsonNode jsonNode, CallContext callContext) {
-        return Headers.getValue(callContext, Headers.HEADER_SPLIT_SIZE, DEFAULT_SPLIT_SIZE, Long.class);
+        return Headers.getValue(callContext, Headers.HEADER_SPLIT_SIZE, Headers.DEFAULT_SPLIT_SIZE, Long.class);
     }
 
     private JsonNode authorize(CallContext callContext, JsonNode sql) throws UnauthorizedException {

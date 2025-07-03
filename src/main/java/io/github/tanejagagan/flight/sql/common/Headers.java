@@ -10,6 +10,7 @@ import java.util.function.Function;
 public class Headers {
 
     public static final int DEFAULT_ARROW_FETCH_SIZE = 10000;
+    public static long DEFAULT_SPLIT_SIZE = 1024 * 1024 * 1024;
     private static final Map<Class<?>, Function<String, Object>> EXTRACTOR = Map.of(
             Integer.class, Integer::parseInt,
             Long.class, Long::parseLong,
