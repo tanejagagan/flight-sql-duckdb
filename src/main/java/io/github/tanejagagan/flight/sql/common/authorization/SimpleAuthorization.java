@@ -7,12 +7,11 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.typesafe.config.ConfigFactory;
+import io.dazzleduck.sql.commons.ExpressionFactory;
+import io.dazzleduck.sql.commons.Transformations;
 import io.github.tanejagagan.flight.sql.common.UnauthorizedException;
 import io.github.tanejagagan.flight.sql.server.Main;
 import io.github.tanejagagan.flight.sql.server.SqlAuthorizer;
-import io.github.tanejagagan.sql.commons.ExpressionFactory;
-import io.github.tanejagagan.sql.commons.Transformations;
-import io.github.tanejagagan.sql.commons.Transformations.CatalogSchemaTable;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -22,7 +21,7 @@ import java.sql.SQLException;
 import java.util.*;
 
 public class SimpleAuthorization implements SqlAuthorizer {
-    private record AccessKey(String user, CatalogSchemaTable catalogSchemaTable) { }
+    private record AccessKey(String user, Transformations.CatalogSchemaTable catalogSchemaTable) { }
     private record AccessValue(JsonNode filter, List<String> columns) { }
     Map<AccessKey, AccessValue> accessMap = new HashMap<>();
     Set<String> superUsers = new HashSet<>();
@@ -46,12 +45,12 @@ public class SimpleAuthorization implements SqlAuthorizer {
         }
 
         userGroupMapping.forEach((user, groups) -> {
-            var map = new HashMap<CatalogSchemaTable, AccessValue>();
+            var map = new HashMap<Transformations.CatalogSchemaTable, AccessValue>();
             groups.forEach(group -> {
                 var _accessRows = groupAccessRowMap.get(group);
                 if(_accessRows != null) {
                     _accessRows.forEach(accessRow -> {
-                        var key = new CatalogSchemaTable(accessRow.database(), accessRow.schema(), accessRow.tableOrPath(), accessRow.type());
+                        var key = new Transformations.CatalogSchemaTable(accessRow.database(), accessRow.schema(), accessRow.tableOrPath(), accessRow.type());
                         map.compute(key, (k, oldValue) -> {
                             if (oldValue == null) {
                                 return collapse(accessRow);

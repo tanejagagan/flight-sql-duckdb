@@ -1,8 +1,8 @@
 package io.github.tanejagagan.http.sql.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.dazzleduck.sql.commons.ConnectionPool;
 import io.github.tanejagagan.flight.sql.common.Headers;
-import io.github.tanejagagan.sql.commons.ConnectionPool;
 import io.helidon.http.HeaderNames;
 import io.helidon.http.HeaderValues;
 import io.helidon.http.Status;
@@ -33,7 +33,15 @@ public class QueryService implements HttpService {
     @Override
     public void routing(HttpRules rules) {
         rules.get("/", this::handleGet)
-                .post("/", this::handlePost);
+                .post("/", this::handlePost)
+                .head("/", this::handleHead);
+    }
+
+    private void handleHead(ServerRequest request,
+                            ServerResponse response) {
+        response.status(Status.OK_200);
+        response.header(HeaderNames.CONTENT_ENCODING, HeaderValues.TRANSFER_ENCODING_CHUNKED.values());
+        response.send();
     }
 
     private void handleGet(ServerRequest request,

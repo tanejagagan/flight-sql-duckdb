@@ -2,8 +2,8 @@ package io.github.tanejagagan.http.sql.server;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.tanejagagan.sql.commons.ConnectionPool;
-import io.github.tanejagagan.sql.commons.util.TestUtils;
+import io.dazzleduck.sql.commons.ConnectionPool;
+import io.dazzleduck.sql.commons.util.TestUtils;
 import io.helidon.http.HeaderNames;
 import io.helidon.http.HeaderValues;
 import org.apache.arrow.memory.RootAllocator;
@@ -110,9 +110,9 @@ public class HttpServerTest {
                 "        'Authorization': 'Bearer "  +  jwtResponse.body() +  "'\n" +
                 "    }\n" +
                 ")";
-        System.out.println(httpAuthSql);
+        ConnectionPool.execute(httpAuthSql);
         //String viewSql = "select concat('http://localhost:8081/query?q=', url_encode('select * from generate_series(10)')))";
-        String viewSql = "select * from read_arrow(concat('http://localhost:59307/query?q=',url_encode('select 1')))";
+        String viewSql = "select * from read_arrow(concat('http://localhost:8081/query?q=',url_encode('select 1')))";
         String[] sqls = {"INSTALL arrow FROM community", "LOAD arrow"};
         ConnectionPool.executeBatch(sqls);
         //ConnectionPool.execute(httpAuthSql);

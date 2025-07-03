@@ -15,11 +15,11 @@ import io.github.tanejagagan.flight.sql.common.FlightStreamReader;
 import io.github.tanejagagan.flight.sql.common.Headers;
 import io.github.tanejagagan.flight.sql.common.UnauthorizedException;
 import io.github.tanejagagan.flight.sql.common.authorization.NOOPAuthorizer;
-import io.github.tanejagagan.sql.commons.ConnectionPool;
-import io.github.tanejagagan.sql.commons.ExpressionFactory;
-import io.github.tanejagagan.sql.commons.FileStatus;
-import io.github.tanejagagan.sql.commons.Transformations;
-import io.github.tanejagagan.sql.commons.planner.SplitPlanner;
+import io.dazzleduck.sql.commons.ConnectionPool;
+import io.dazzleduck.sql.commons.ExpressionFactory;
+import io.dazzleduck.sql.commons.FileStatus;
+import io.dazzleduck.sql.commons.Transformations;
+import io.dazzleduck.sql.commons.planner.SplitPlanner;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.sql.FlightSqlProducer;
@@ -51,7 +51,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.protobuf.Any.pack;
 import static com.google.protobuf.ByteString.copyFrom;
-import static io.github.tanejagagan.sql.commons.ExpressionFactory.createFunction;
 import static java.util.Collections.singletonList;
 import static java.util.Objects.isNull;
 import static org.duckdb.DuckDBConnection.DEFAULT_SCHEMA;
@@ -823,10 +822,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
         for (String path : paths) {
             listChildren.add(ExpressionFactory.constant(path));
         }
-        var listFunction = createFunction("list_value", "main", "", listChildren);
+        var listFunction = ExpressionFactory.createFunction("list_value", "main", "", listChildren);
         var parquetChildren = new ArrayNode(JsonNodeFactory.instance);
         parquetChildren.add(listFunction);
-        var readParquetFunction = createFunction(functionName, "", "", parquetChildren);
+        var readParquetFunction = ExpressionFactory.createFunction(functionName, "", "", parquetChildren);
         from.set("function", readParquetFunction);
     }
 

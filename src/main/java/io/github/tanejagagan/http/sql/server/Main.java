@@ -74,7 +74,13 @@ public class Main {
         WebServer server = WebServer.builder()
                 .config(helidonConfig.get("flight-sql"))
                 .routing( routing -> {
-                        var b = routing.register("/query", new QueryService(new RootAllocator()))
+                        var b = routing
+                                .addFilter((chain, req, resp) -> {
+                                    System.out.println(req);
+                                    chain.proceed();
+                                })
+                                .register("/", new QueryService(new RootAllocator()))
+                                .register("/query", new QueryService(new RootAllocator()))
                                 .register("/login", new LoginService(appConfig, secretKey));
                         if("jwt".equals(auth)) {
                             b.addFilter(new JwtAuthenticationFilter("/query", appConfig, secretKey));
